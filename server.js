@@ -104,6 +104,39 @@ function looksPaywalled(text) {
   return PAYWALL_SIGNALS.some((s) => lower.includes(s));
 }
 
+// --- HTML to clean text (preserves paragraph breaks) ---
+function htmlToText(html) {
+  if (!html) return "";
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li|blockquote|h[1-6]|tr|section|article)>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// --- Boilerplate stripping ---
+const BOILERPLATE_RE = [
+  /^unlock the editor'?s digest for free[^\n]*(?:\n[^\n]+){0,3}\n\n/i,
+  /^sign up to [^\n]+ newsletter[^\n]*(?:\n[^\n]+){0,3}\n\n/i,
+  /^this article is part of the ft'?s [^\n]*\n\n/i,
+];
+
+function stripBoilerplate(text) {
+  let cleaned = text;
+  for (const re of BOILERPLATE_RE) {
+    cleaned = cleaned.replace(re, "");
+  }
+  return cleaned;
+}
+
 // --- Archive.ph fallback ---
 async function fetchViaArchive(url) {
   const controller = new AbortController();
@@ -352,14 +385,19 @@ app.post("/api/archive", async (req, res) => {
         .json({ error: "Could not extract article content from this URL" });
     }
 
+    // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
+    const cleanedText = stripBoilerplate(
+      htmlToText(article.content) || article.textContent
+    );
+
     res.json({
       title: article.title,
       byline: article.byline,
       siteName: article.siteName,
       content: article.content,
-      textContent: article.textContent,
+      textContent: cleanedText,
       excerpt: article.excerpt,
-      length: article.length,
+      length: cleanedText.length,
     });
   } catch (err) {
     console.error("Archive error:", err.message);
