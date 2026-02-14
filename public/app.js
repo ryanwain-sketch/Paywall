@@ -166,6 +166,11 @@ async function archive() {
     }
 
     if (!res.ok) {
+      if (data.fallbackUrl) {
+        showError(data.error, data.fallbackUrl, data.fallbackLabel);
+      } else {
+        showError(data.error || "Failed to cage article.");
+      }
       throw new Error(data.error || "Failed to cage article.");
     }
 
@@ -187,7 +192,8 @@ async function archive() {
   } catch (err) {
     cageArea.className = "cage-area";
     cageStatus.textContent = "Paste a URL and cage that page";
-    showError(err.message);
+    // Don't overwrite a fallback-link error that was already shown
+    if (errorMsg.hidden) showError(err.message);
   } finally {
     archiveBtn.disabled = false;
   }
@@ -320,12 +326,23 @@ function renderHistory() {
 }
 
 // --- Helpers ---
-function showError(msg) {
-  errorMsg.textContent = msg;
+function showError(msg, fallbackUrl, fallbackLabel) {
+  if (fallbackUrl) {
+    errorMsg.innerHTML =
+      escapeHtml(msg) +
+      ' <a href="' +
+      escapeHtml(fallbackUrl) +
+      '" target="_blank" rel="noopener noreferrer" style="color:#4fc3f7;text-decoration:underline">' +
+      escapeHtml(fallbackLabel || "Try Wayback Machine") +
+      " \u2197</a>";
+  } else {
+    errorMsg.textContent = msg;
+  }
   errorMsg.hidden = false;
 }
 
 function hideError() {
+  errorMsg.textContent = "";
   errorMsg.hidden = true;
 }
 

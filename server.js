@@ -365,7 +365,9 @@ async function fetchViaWayback(url) {
     const data = await resp.json();
     const snapshot = data?.archived_snapshots?.closest;
     if (!snapshot || !snapshot.available || !snapshot.url) {
-      console.log("Wayback Machine: no snapshot available");
+      console.log("Wayback Machine: no snapshot available — triggering Save Page Now");
+      // Trigger a save so future requests may find a snapshot
+      triggerWaybackSave(url);
       return null;
     }
 
@@ -406,6 +408,22 @@ async function fetchViaWayback(url) {
     console.error(`Wayback Machine failed: ${err.message}`);
     return null;
   }
+}
+
+// Fire-and-forget: ask Wayback Machine to save a page for next time
+function triggerWaybackSave(url) {
+  const saveUrl = `https://web.archive.org/save/${url}`;
+  console.log(`Wayback Save Page Now: ${saveUrl}`);
+  fetch(saveUrl, {
+    method: "POST",
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({ url, capture_all: "1" }),
+  })
+    .then((r) => console.log(`Wayback save responded: ${r.status}`))
+    .catch((e) => console.error(`Wayback save failed: ${e.message}`));
 }
 
 // --- Pro cookie helpers ---
@@ -712,6 +730,8 @@ app.post("/api/archive", async (req, res) => {
       return res.status(422).json({
         error:
           "Could not extract article content. The site may require a login or block automated access.",
+        fallbackUrl: `https://web.archive.org/web/*/${url}`,
+        fallbackLabel: "Search Wayback Machine",
       });
     }
 
@@ -721,6 +741,8 @@ app.post("/api/archive", async (req, res) => {
       return res.status(422).json({
         error:
           "Could not bypass the paywall. The article content is behind a login or subscription wall.",
+        fallbackUrl: `https://web.archive.org/web/*/${url}`,
+        fallbackLabel: "Try Wayback Machine",
       });
     }
 
