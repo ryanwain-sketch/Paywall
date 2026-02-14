@@ -2,20 +2,120 @@ const express = require("express");
 const { Readability } = require("@mozilla/readability");
 const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
+const crypto = require("crypto");
 const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FREE_DAILY_LIMIT = 3;
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+// --- Stripe setup ---
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
+const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString("hex");
+
+let stripe;
+if (STRIPE_SECRET_KEY) {
+  stripe = require("stripe")(STRIPE_SECRET_KEY);
+} else {
+  console.warn("STRIPE_SECRET_KEY not set — payment endpoints disabled");
+}
+
+// Pro users: Set of Stripe customer IDs with active subscriptions
+const proCustomers = new Set();
 
 // Trust proxy for correct IP behind reverse proxies
 app.set("trust proxy", 1);
 
+// Stripe webhook needs raw body — must be registered BEFORE express.json()
+app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: "Payments not configured" });
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error("Webhook signature verification failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const session = event.data.object;
+      if (session.customer) {
+        proCustomers.add(session.customer);
+        console.log(`Pro activated: ${session.customer}`);
+      }
+      break;
+    }
+    case "customer.subscription.deleted":
+    case "customer.subscription.paused": {
+      const sub = event.data.object;
+      if (sub.customer) {
+        proCustomers.delete(sub.customer);
+        console.log(`Pro deactivated: ${sub.customer}`);
+      }
+      break;
+    }
+    case "customer.subscription.updated": {
+      const sub = event.data.object;
+      if (sub.customer) {
+        if (sub.status === "active") {
+          proCustomers.add(sub.customer);
+        } else {
+          proCustomers.delete(sub.customer);
+        }
+      }
+      break;
+    }
+  }
+
+  res.json({ received: true });
+});
+
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// --- Pro cookie helpers ---
+function signCookie(customerId) {
+  const hmac = crypto.createHmac("sha256", COOKIE_SECRET);
+  hmac.update(customerId);
+  return `${customerId}.${hmac.digest("hex")}`;
+}
+
+function verifyCookie(value) {
+  if (!value || !value.includes(".")) return null;
+  const [customerId, sig] = value.split(".");
+  const hmac = crypto.createHmac("sha256", COOKIE_SECRET);
+  hmac.update(customerId);
+  const expected = hmac.digest("hex");
+  if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return customerId;
+  }
+  return null;
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const cookies = {};
+  for (const pair of header.split(";")) {
+    const [key, ...rest] = pair.trim().split("=");
+    if (key) cookies[key] = decodeURIComponent(rest.join("="));
+  }
+  return cookies;
+}
+
+function isProUser(req) {
+  const cookies = parseCookies(req);
+  const customerId = verifyCookie(cookies.cage_pro);
+  return customerId && proCustomers.has(customerId);
+}
 
 // --- Rate limiting (in-memory, per-IP, daily reset) ---
 const rateLimits = new Map();
@@ -45,23 +145,90 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
-function setRateLimitHeaders(res, bucket) {
-  res.set("X-RateLimit-Limit", String(FREE_DAILY_LIMIT));
-  res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
-  res.set("X-RateLimit-Reset", String(Math.floor(bucket.resetAt / 1000)));
+function setRateLimitHeaders(res, bucket, isPro) {
+  if (isPro) {
+    res.set("X-RateLimit-Limit", "unlimited");
+    res.set("X-RateLimit-Remaining", "unlimited");
+  } else {
+    res.set("X-RateLimit-Limit", String(FREE_DAILY_LIMIT));
+    res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
+    res.set("X-RateLimit-Reset", String(Math.floor(bucket.resetAt / 1000)));
+  }
 }
 
 // Expose remaining cages without consuming one
 app.get("/api/usage", (req, res) => {
+  const pro = isProUser(req);
+  if (pro) {
+    return res.json({ pro: true, limit: null, used: 0, remaining: null });
+  }
   const ip = req.ip;
   const bucket = getRateLimitBucket(ip);
-  setRateLimitHeaders(res, bucket);
+  setRateLimitHeaders(res, bucket, false);
   res.json({
+    pro: false,
     limit: FREE_DAILY_LIMIT,
     used: bucket.count,
     remaining: Math.max(0, FREE_DAILY_LIMIT - bucket.count),
     resetAt: bucket.resetAt,
   });
+});
+
+// --- Stripe Checkout ---
+app.post("/api/checkout", async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: "Payments not configured yet." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: "Cage that Page Pro",
+            description: "Unlimited cages, cloud history, and batch export",
+          },
+          unit_amount: 500,
+          recurring: { interval: "month" },
+        },
+        quantity: 1,
+      }],
+      success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${SITE_URL}`,
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("Checkout error:", err.message);
+    res.status(500).json({ error: "Failed to create checkout session." });
+  }
+});
+
+// Success: verify Stripe session and set Pro cookie
+app.get("/success", async (req, res) => {
+  const sessionId = req.query.session_id;
+  if (!stripe || !sessionId) {
+    return res.redirect("/");
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status === "paid" && session.customer) {
+      proCustomers.add(session.customer);
+      const signed = signCookie(session.customer);
+      res.setHeader(
+        "Set-Cookie",
+        `cage_pro=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+      );
+    }
+  } catch (err) {
+    console.error("Session verify error:", err.message);
+  }
+
+  res.redirect("/?pro=1");
 });
 
 // Archive: fetch article and extract readable content
@@ -78,23 +245,24 @@ app.post("/api/archive", async (req, res) => {
     return res.status(400).json({ error: "Invalid URL" });
   }
 
-  // Rate limit check
+  // Rate limit check — Pro users bypass
+  const pro = isProUser(req);
   const ip = req.ip;
   const bucket = getRateLimitBucket(ip);
-  setRateLimitHeaders(res, bucket);
+  setRateLimitHeaders(res, bucket, pro);
 
-  if (bucket.count >= FREE_DAILY_LIMIT) {
-    return res.status(429).json({
-      error: "You've used all 3 free cages for today.",
-      upgrade: true,
-      remaining: 0,
-      resetAt: bucket.resetAt,
-    });
+  if (!pro) {
+    if (bucket.count >= FREE_DAILY_LIMIT) {
+      return res.status(429).json({
+        error: "You've used all 3 free cages for today.",
+        upgrade: true,
+        remaining: 0,
+        resetAt: bucket.resetAt,
+      });
+    }
+    bucket.count++;
+    res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
   }
-
-  // Count this cage
-  bucket.count++;
-  res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
 
   try {
     const response = await fetch(url, {
