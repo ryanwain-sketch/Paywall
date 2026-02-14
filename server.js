@@ -4,6 +4,7 @@ const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 const path = require("path");
+const { chromium } = require("playwright");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -137,54 +138,66 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
-// --- Archive fallback sources ---
-const ARCHIVE_SOURCES = [
-  {
-    name: "archive.ph",
-    buildUrl: (url) => `https://archive.ph/newest/${url}`,
-  },
-  {
-    name: "archive.today",
-    buildUrl: (url) => `https://archive.today/newest/${url}`,
-  },
-  {
-    name: "Google cache",
-    buildUrl: (url) =>
-      `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(url)}`,
-  },
+// --- Archive fallback (headless browser to bypass Cloudflare) ---
+let _browser = null;
+
+async function getBrowser() {
+  if (_browser && _browser.isConnected()) return _browser;
+  _browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  return _browser;
+}
+
+const ARCHIVE_URLS = [
+  (url) => `https://archive.ph/newest/${url}`,
+  (url) => `https://archive.today/newest/${url}`,
 ];
 
 async function fetchViaArchive(url) {
-  for (const source of ARCHIVE_SOURCES) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+  let browser;
+  try {
+    browser = await getBrowser();
+  } catch (err) {
+    console.error("Failed to launch browser:", err.message);
+    return null;
+  }
+
+  for (const buildUrl of ARCHIVE_URLS) {
+    const archiveUrl = buildUrl(url);
+    let page;
     try {
-      const archiveUrl = source.buildUrl(url);
-      console.log(`Trying ${source.name}: ${archiveUrl}`);
-      const resp = await fetch(archiveUrl, {
-        headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-        redirect: "follow",
-        signal: controller.signal,
+      page = await browser.newPage();
+      console.log(`Trying archive: ${archiveUrl}`);
+      const resp = await page.goto(archiveUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
       });
-      clearTimeout(timeout);
-      console.log(`${source.name} responded: ${resp.status} (${resp.url})`);
-      if (!resp.ok) continue;
-      const html = await resp.text();
-      const dom = new JSDOM(html, { url: resp.url });
+      if (!resp || resp.status() >= 400) {
+        console.log(`Archive responded: ${resp?.status() || "no response"}`);
+        continue;
+      }
+      // Wait a moment for any JS-rendered content
+      await page.waitForTimeout(2000);
+      const html = await page.content();
+      const finalUrl = page.url();
+      console.log(`Archive loaded: ${finalUrl} (${html.length} bytes)`);
+
+      const dom = new JSDOM(html, { url: finalUrl });
       const reader = new Readability(dom.window.document);
       const article = reader.parse();
       if (article && article.textContent && article.textContent.length > 500) {
-        console.log(
-          `${source.name} returned article: ${article.textContent.length} chars`
-        );
+        console.log(`Archive returned article: ${article.textContent.length} chars`);
         return article;
       }
       console.log(
-        `${source.name} returned insufficient content (${article?.textContent?.length || 0} chars)`
+        `Archive returned insufficient content (${article?.textContent?.length || 0} chars)`
       );
     } catch (err) {
-      clearTimeout(timeout);
-      console.error(`${source.name} failed: ${err.message}`);
+      console.error(`Archive fetch failed: ${err.message}`);
+    } finally {
+      if (page) await page.close().catch(() => {});
     }
   }
   return null;
