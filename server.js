@@ -137,28 +137,57 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
-// --- Archive.ph fallback ---
+// --- Archive fallback sources ---
+const ARCHIVE_SOURCES = [
+  {
+    name: "archive.ph",
+    buildUrl: (url) => `https://archive.ph/newest/${url}`,
+  },
+  {
+    name: "archive.today",
+    buildUrl: (url) => `https://archive.today/newest/${url}`,
+  },
+  {
+    name: "Google cache",
+    buildUrl: (url) =>
+      `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(url)}`,
+  },
+];
+
 async function fetchViaArchive(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const archiveUrl = `https://archive.ph/newest/${url}`;
-    const resp = await fetch(archiveUrl, {
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const html = await resp.text();
-    const dom = new JSDOM(html, { url: resp.url });
-    const reader = new Readability(dom.window.document);
-    return reader.parse();
-  } catch (err) {
-    clearTimeout(timeout);
-    console.error("Archive.ph fetch failed:", err.message);
-    return null;
+  for (const source of ARCHIVE_SOURCES) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const archiveUrl = source.buildUrl(url);
+      console.log(`Trying ${source.name}: ${archiveUrl}`);
+      const resp = await fetch(archiveUrl, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      console.log(`${source.name} responded: ${resp.status} (${resp.url})`);
+      if (!resp.ok) continue;
+      const html = await resp.text();
+      const dom = new JSDOM(html, { url: resp.url });
+      const reader = new Readability(dom.window.document);
+      const article = reader.parse();
+      if (article && article.textContent && article.textContent.length > 500) {
+        console.log(
+          `${source.name} returned article: ${article.textContent.length} chars`
+        );
+        return article;
+      }
+      console.log(
+        `${source.name} returned insufficient content (${article?.textContent?.length || 0} chars)`
+      );
+    } catch (err) {
+      clearTimeout(timeout);
+      console.error(`${source.name} failed: ${err.message}`);
+    }
   }
+  return null;
 }
 
 // --- Pro cookie helpers ---
@@ -379,11 +408,10 @@ app.post("/api/archive", async (req, res) => {
     }
 
     if (!article) {
-      const status = response.ok ? 422 : 502;
       const message = response.ok
         ? "Could not extract article content from this URL"
-        : `Failed to fetch URL (HTTP ${response.status})`;
-      return res.status(status).json({ error: message });
+        : `This site blocked direct access (HTTP ${response.status}) and no archived version was found. Try archiving the page on archive.ph first, then cage it again.`;
+      return res.status(422).json({ error: message });
     }
 
     // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
