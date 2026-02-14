@@ -10,14 +10,26 @@ const articleTitle = document.getElementById("article-title");
 const articleMeta = document.getElementById("article-meta");
 const articleExcerpt = document.getElementById("article-excerpt");
 
+const historySection = document.getElementById("history");
+const historyList = document.getElementById("history-list");
+const clearHistoryBtn = document.getElementById("clear-history-btn");
+
+const STORAGE_KEY = "cage-history";
+
 let currentArticle = null;
 
+// --- Events ---
 archiveBtn.addEventListener("click", archive);
 urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") archive();
 });
-pdfBtn.addEventListener("click", downloadPdf);
+pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
+clearHistoryBtn.addEventListener("click", clearHistory);
 
+// --- Init ---
+renderHistory();
+
+// --- Archive ---
 async function archive() {
   const url = urlInput.value.trim();
   if (!url) {
@@ -36,7 +48,6 @@ async function archive() {
   result.hidden = true;
   archiveBtn.disabled = true;
 
-  // Start cage-drop animation
   cageArea.className = "cage-area caging";
   cageStatus.textContent = "Caging that page\u2026";
 
@@ -62,12 +73,13 @@ async function archive() {
     articleMeta.textContent = metaParts.join(" \u2014 ");
     articleExcerpt.textContent = data.excerpt || "";
 
-    // Success — page is caged
     cageArea.className = "cage-area caged";
     cageStatus.textContent = "Page caged!";
     result.hidden = false;
+
+    // Save to history
+    saveToHistory(currentArticle);
   } catch (err) {
-    // Reset cage to idle
     cageArea.className = "cage-area";
     cageStatus.textContent = "Paste a URL and cage that page";
     showError(err.message);
@@ -76,19 +88,21 @@ async function archive() {
   }
 }
 
-async function downloadPdf() {
-  if (!currentArticle) return;
+// --- PDF Download ---
+async function downloadPdf(article, btn) {
+  if (!article) return;
 
-  pdfBtn.disabled = true;
-  const btnText = pdfBtn.querySelector(".pdf-btn-text strong");
-  const origText = btnText.textContent;
-  btnText.textContent = "Generating PDF\u2026";
+  const targetBtn = btn || pdfBtn;
+  const strong = targetBtn.querySelector("strong");
+  const origText = strong ? strong.textContent : null;
+  targetBtn.disabled = true;
+  if (strong) strong.textContent = "Generating PDF\u2026";
 
   try {
     const res = await fetch("/api/pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentArticle),
+      body: JSON.stringify(article),
     });
 
     if (!res.ok) {
@@ -111,11 +125,96 @@ async function downloadPdf() {
   } catch (err) {
     showError(err.message);
   } finally {
-    pdfBtn.disabled = false;
-    btnText.textContent = origText;
+    targetBtn.disabled = false;
+    if (strong && origText) strong.textContent = origText;
   }
 }
 
+// --- History: localStorage ---
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToHistory(article) {
+  const history = getHistory();
+
+  // Don't duplicate the same URL if caged again — move it to the top
+  const filtered = history.filter((h) => h.sourceUrl !== article.sourceUrl);
+
+  filtered.unshift({
+    title: article.title,
+    byline: article.byline,
+    siteName: article.siteName,
+    textContent: article.textContent,
+    excerpt: article.excerpt,
+    sourceUrl: article.sourceUrl,
+    cagedAt: new Date().toISOString(),
+  });
+
+  // Keep max 50 entries
+  if (filtered.length > 50) filtered.length = 50;
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+  renderHistory();
+}
+
+function deleteFromHistory(sourceUrl) {
+  const history = getHistory().filter((h) => h.sourceUrl !== sourceUrl);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  renderHistory();
+}
+
+function clearHistory() {
+  localStorage.removeItem(STORAGE_KEY);
+  renderHistory();
+}
+
+// --- History: render ---
+function renderHistory() {
+  const history = getHistory();
+
+  if (history.length === 0) {
+    historySection.hidden = true;
+    return;
+  }
+
+  historySection.hidden = false;
+  historyList.innerHTML = "";
+
+  for (const item of history) {
+    const card = document.createElement("div");
+    card.className = "history-card";
+
+    const metaParts = [];
+    if (item.siteName) metaParts.push(item.siteName);
+    metaParts.push(formatDate(item.cagedAt));
+
+    card.innerHTML = `
+      <div class="history-card-title">${escapeHtml(item.title || "Untitled")}</div>
+      <div class="history-card-meta">${escapeHtml(metaParts.join(" \u2014 "))}</div>
+      ${item.excerpt ? `<div class="history-card-excerpt">${escapeHtml(item.excerpt)}</div>` : ""}
+      <div class="history-card-actions">
+        <button class="history-download-btn" type="button"><strong>PDF</strong></button>
+        <button class="history-delete-btn" type="button">Remove</button>
+      </div>
+    `;
+
+    const dlBtn = card.querySelector(".history-download-btn");
+    dlBtn.addEventListener("click", () => downloadPdf(item, dlBtn));
+
+    card.querySelector(".history-delete-btn").addEventListener("click", () => {
+      deleteFromHistory(item.sourceUrl);
+    });
+
+    historyList.appendChild(card);
+  }
+}
+
+// --- Helpers ---
 function showError(msg) {
   errorMsg.textContent = msg;
   errorMsg.hidden = false;
@@ -123,4 +222,19 @@ function showError(msg) {
 
 function hideError() {
   errorMsg.hidden = true;
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
 }
