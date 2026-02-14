@@ -166,22 +166,23 @@ async function tryFetchArchiveUrl(fetchUrl, label) {
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    console.log(`${label} responded: ${resp.status} → ${resp.url}`);
 
-    if (!resp.ok) return { article: null, status: resp.status, resolvedUrl: resp.url };
+    const locationHeader = resp.headers.get("location") || null;
+    console.log(`${label} responded: ${resp.status} → ${resp.url}${locationHeader ? ` (Location: ${locationHeader})` : ""}`);
 
+    // Always try to parse the body — archive.ph serves full content even on 429
     const html = await resp.text();
     const article = parseArticleFromHtml(html, resp.url);
     if (article && article.textContent && article.textContent.length > 500) {
       console.log(`${label} returned article: ${article.textContent.length} chars`);
-      return { article, status: resp.status, resolvedUrl: resp.url };
+      return { article, status: resp.status, locationHeader };
     }
     console.log(`${label} returned insufficient content (${article?.textContent?.length || 0} chars)`);
-    return { article: null, status: resp.status, resolvedUrl: resp.url };
+    return { article: null, status: resp.status, locationHeader };
   } catch (err) {
     clearTimeout(timeout);
     console.error(`${label} failed: ${err.message}`);
-    return { article: null, status: 0, resolvedUrl: null };
+    return { article: null, status: 0, locationHeader: null };
   }
 }
 
@@ -194,53 +195,18 @@ async function fetchViaArchive(url) {
   for (const buildUrl of ARCHIVE_SOURCES) {
     const archiveUrl = buildUrl(url);
 
-    const { article, status, resolvedUrl } = await tryFetchArchiveUrl(archiveUrl, "Trying archive");
+    const { article, status, locationHeader } = await tryFetchArchiveUrl(archiveUrl, "Trying archive");
     if (article) return article;
 
-    // If 429 redirected to a snapshot URL, try it immediately
-    if (status === 429 && resolvedUrl && isSnapshotUrl(resolvedUrl)) {
-      console.log(`Got snapshot URL from redirect, trying immediately: ${resolvedUrl}`);
-      const snap = await tryFetchArchiveUrl(resolvedUrl, "Snapshot fetch");
+    // On 429, archive.ph puts snapshot URL in Location header (not a real redirect)
+    if (status === 429 && locationHeader && isSnapshotUrl(locationHeader)) {
+      console.log(`Got snapshot URL from Location header, trying: ${locationHeader}`);
+      const snap = await tryFetchArchiveUrl(locationHeader, "Snapshot fetch");
       if (snap.article) return snap.article;
     }
   }
 
   return null;
-}
-
-// --- Google webcache fallback ---
-async function fetchViaWebcache(url) {
-  const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(url)}&strip=0`;
-  console.log(`Trying Google webcache: ${cacheUrl}`);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const resp = await fetch(cacheUrl, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) {
-      console.log(`Google webcache responded: ${resp.status}`);
-      return null;
-    }
-    const html = await resp.text();
-    const article = parseArticleFromHtml(html, url);
-    if (article && article.textContent && article.textContent.length > 500) {
-      console.log(`Google webcache returned article: ${article.textContent.length} chars`);
-      return article;
-    }
-    console.log(`Google webcache returned insufficient content (${article?.textContent?.length || 0} chars)`);
-    return null;
-  } catch (err) {
-    clearTimeout(timeout);
-    console.error(`Google webcache fetch failed: ${err.message}`);
-    return null;
-  }
 }
 
 // --- Pro cookie helpers ---
@@ -478,23 +444,16 @@ app.post("/api/archive", async (req, res) => {
       }
     }
 
-    // Step 2: Archive.ph + Google webcache in parallel
+    // Step 2: Archive.ph fallback
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 2 — archive.ph + webcache (parallel)");
-      const [archived, cached] = await Promise.all([
-        fetchViaArchive(url),
-        fetchViaWebcache(url),
-      ]);
-
-      // Pick whichever returned the most content
-      for (const candidate of [archived, cached]) {
-        if (
-          candidate &&
-          candidate.textContent &&
-          (!article || candidate.textContent.length > article.textContent.length)
-        ) {
-          article = candidate;
-        }
+      console.log("Step 2 — archive.ph fallback");
+      const archived = await fetchViaArchive(url);
+      if (
+        archived &&
+        archived.textContent &&
+        (!article || archived.textContent.length > article.textContent.length)
+      ) {
+        article = archived;
       }
     }
 
