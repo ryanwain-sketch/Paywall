@@ -148,6 +148,11 @@ header h1 {
   background: var(--brand);
 }
 
+.usage-bar.pro {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* --- Upgrade Banner --- */
 .upgrade-banner {
   margin-top: 20px;

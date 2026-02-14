@@ -24,6 +24,7 @@ const STORAGE_KEY = "cage-history";
 const FREE_LIMIT = 3;
 
 let currentArticle = null;
+let isPro = false;
 
 // --- Events ---
 archiveBtn.addEventListener("click", archive);
@@ -32,24 +33,56 @@ urlInput.addEventListener("keydown", (e) => {
 });
 pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
 clearHistoryBtn.addEventListener("click", clearHistory);
-upgradeBtn.addEventListener("click", () => {
-  // Placeholder — will wire to Stripe Checkout
-  alert("Stripe checkout coming soon! You'll be able to go Pro for $5/mo.");
+upgradeBtn.addEventListener("click", async () => {
+  upgradeBtn.disabled = true;
+  upgradeBtn.textContent = "Redirecting\u2026";
+  try {
+    const res = await fetch("/api/checkout", { method: "POST" });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error(data.error || "Could not start checkout.");
+    }
+  } catch (err) {
+    showError(err.message);
+    upgradeBtn.disabled = false;
+    upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
+  }
 });
 
 // --- Init ---
 renderHistory();
 fetchUsage();
 
+// Clean ?pro=1 from URL after Stripe redirect
+if (new URLSearchParams(window.location.search).get("pro") === "1") {
+  history.replaceState(null, "", "/");
+}
+
 // --- Usage ---
 async function fetchUsage() {
   try {
     const res = await fetch("/api/usage");
     const data = await res.json();
-    renderUsage(data.remaining);
+    isPro = !!data.pro;
+    if (isPro) {
+      renderProStatus();
+    } else {
+      renderUsage(data.remaining);
+    }
   } catch {
     // Silently fail — usage bar just stays hidden
   }
+}
+
+function renderProStatus() {
+  usageBar.hidden = false;
+  usageBar.classList.add("pro");
+  usageText.textContent = "Pro \u2014 Unlimited cages";
+  usageDots.innerHTML = "";
+  hideUpgradeBanner();
+  archiveBtn.disabled = false;
 }
 
 function renderUsage(remaining) {
@@ -112,14 +145,16 @@ async function archive() {
 
     const data = await res.json();
 
-    // Update usage from response headers
-    const remaining = res.headers.get("X-RateLimit-Remaining");
-    if (remaining !== null) renderUsage(parseInt(remaining, 10));
+    // Update usage from response headers (skip for Pro — they're unlimited)
+    if (!isPro) {
+      const remaining = res.headers.get("X-RateLimit-Remaining");
+      if (remaining !== null) renderUsage(parseInt(remaining, 10));
+    }
 
     if (res.status === 429) {
       cageArea.className = "cage-area";
       cageStatus.textContent = "Paste a URL and cage that page";
-      renderUsage(0);
+      if (!isPro) renderUsage(0);
       return;
     }
 
