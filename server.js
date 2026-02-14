@@ -138,7 +138,7 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
-// --- Archive fallback (headless browser to bypass Cloudflare) ---
+// --- Headless browser helpers ---
 let _browser = null;
 
 async function getBrowser() {
@@ -150,6 +150,47 @@ async function getBrowser() {
   return _browser;
 }
 
+// Fetch a URL with a real headless browser (bypasses 403s and JS-gated content)
+async function fetchWithBrowser(targetUrl) {
+  let browser;
+  try {
+    browser = await getBrowser();
+  } catch (err) {
+    console.error("Failed to launch browser:", err.message);
+    return null;
+  }
+
+  let page;
+  try {
+    page = await browser.newPage();
+    // Look like a normal user coming from Google
+    await page.setExtraHTTPHeaders({ Referer: "https://www.google.com/" });
+    console.log(`Browser fetch: ${targetUrl}`);
+    const resp = await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    if (!resp || resp.status() >= 400) {
+      console.log(`Browser fetch responded: ${resp?.status() || "no response"}`);
+      return null;
+    }
+    // Let JS-rendered content settle
+    await page.waitForTimeout(2000);
+    const html = await page.content();
+    console.log(`Browser fetch loaded: ${page.url()} (${html.length} bytes)`);
+
+    const dom = new JSDOM(html, { url: page.url() });
+    const reader = new Readability(dom.window.document);
+    return reader.parse();
+  } catch (err) {
+    console.error(`Browser fetch failed: ${err.message}`);
+    return null;
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+}
+
+// Try archive.ph / archive.today as last resort
 const ARCHIVE_URLS = [
   (url) => `https://archive.ph/newest/${url}`,
   (url) => `https://archive.today/newest/${url}`,
@@ -178,8 +219,8 @@ async function fetchViaArchive(url) {
         console.log(`Archive responded: ${resp?.status() || "no response"}`);
         continue;
       }
-      // Wait a moment for any JS-rendered content
-      await page.waitForTimeout(2000);
+      // Wait for Cloudflare challenge or JS content to settle
+      await page.waitForTimeout(3000);
       const html = await page.content();
       const finalUrl = page.url();
       console.log(`Archive loaded: ${finalUrl} (${html.length} bytes)`);
@@ -388,7 +429,8 @@ app.post("/api/archive", async (req, res) => {
   try {
     let article = null;
 
-    // Try direct fetch first
+    // Step 1: Plain HTTP fetch (fast, works for most sites)
+    console.log(`Step 1 — plain fetch: ${url}`);
     const response = await fetch(url, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -408,8 +450,22 @@ app.post("/api/archive", async (req, res) => {
       article = reader.parse();
     }
 
-    // Fall back to archive.ph if direct fetch failed, returned no content, or hit a paywall
+    // Step 2: Headless browser direct fetch (handles 403s and JS-gated paywalls)
     if (!article || looksPaywalled(article.textContent)) {
+      console.log("Step 2 — browser direct fetch");
+      const browserArticle = await fetchWithBrowser(url);
+      if (
+        browserArticle &&
+        browserArticle.textContent &&
+        (!article || browserArticle.textContent.length > article.textContent.length)
+      ) {
+        article = browserArticle;
+      }
+    }
+
+    // Step 3: Archive.ph as last resort (may hit CAPTCHA)
+    if (!article || looksPaywalled(article.textContent)) {
+      console.log("Step 3 — archive.ph fallback");
       const archived = await fetchViaArchive(url);
       if (
         archived &&
@@ -421,10 +477,10 @@ app.post("/api/archive", async (req, res) => {
     }
 
     if (!article) {
-      const message = response.ok
-        ? "Could not extract article content from this URL"
-        : `This site blocked direct access (HTTP ${response.status}) and no archived version was found. Try archiving the page on archive.ph first, then cage it again.`;
-      return res.status(422).json({ error: message });
+      return res.status(422).json({
+        error:
+          "Could not extract article content. The site may require a login or block automated access.",
+      });
     }
 
     // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
