@@ -81,7 +81,8 @@ function renderProStatus() {
   usageBar.classList.add("pro");
   usageText.textContent = "Pro \u2014 Unlimited cages";
   usageDots.innerHTML = "";
-  hideUpgradeBanner();
+  upgradeBanner.hidden = true;
+  upgradeBanner.style.display = "none";
   archiveBtn.disabled = false;
 }
 
