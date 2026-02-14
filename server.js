@@ -89,6 +89,7 @@ const PAYWALL_SIGNALS = [
   "subscription required",
   "sign in to read",
   "register to read",
+  "register to unlock",
   "for subscribers only",
   "start your free trial",
   "create a free account",
@@ -96,12 +97,34 @@ const PAYWALL_SIGNALS = [
   "continue reading with",
   "paywall",
   "premium content",
+  "full range of subscriptions",
+  "explore more offers",
+  "for your first year",
+  "complete digital access",
+  "become a member",
+  "members-only",
+  "log in to read",
+  "digital access for organisations",
 ];
 
 function looksPaywalled(text) {
   if (!text || text.length < 500) return true;
   const lower = text.toLowerCase();
   return PAYWALL_SIGNALS.some((s) => lower.includes(s));
+}
+
+// Pick the best article: non-paywalled always beats paywalled, then prefer longer
+function pickBestArticle(current, candidate) {
+  if (!current || !current.textContent) return candidate;
+  const curPaywalled = looksPaywalled(current.textContent);
+  const candPaywalled = looksPaywalled(candidate.textContent);
+
+  // Non-paywalled always wins over paywalled
+  if (curPaywalled && !candPaywalled) return candidate;
+  if (!curPaywalled && candPaywalled) return current;
+
+  // Same paywall status — prefer longer content
+  return candidate.textContent.length > current.textContent.length ? candidate : current;
 }
 
 // --- HTML to clean text (preserves paragraph breaks) ---
@@ -519,12 +542,8 @@ app.post("/api/archive", async (req, res) => {
           const gbHtml = await gbResp.text();
           const gbDom = new JSDOM(gbHtml, { url });
           const gbArticle = new Readability(gbDom.window.document).parse();
-          if (
-            gbArticle &&
-            gbArticle.textContent &&
-            (!article || gbArticle.textContent.length > article.textContent.length)
-          ) {
-            article = gbArticle;
+          if (gbArticle && gbArticle.textContent) {
+            article = pickBestArticle(article, gbArticle);
           }
         }
       } catch (err) {
@@ -541,12 +560,8 @@ app.post("/api/archive", async (req, res) => {
       ]);
 
       for (const candidate of [archived, wayback]) {
-        if (
-          candidate &&
-          candidate.textContent &&
-          (!article || candidate.textContent.length > article.textContent.length)
-        ) {
-          article = candidate;
+        if (candidate && candidate.textContent) {
+          article = pickBestArticle(article, candidate);
         }
       }
     }
@@ -555,6 +570,15 @@ app.post("/api/archive", async (req, res) => {
       return res.status(422).json({
         error:
           "Could not extract article content. The site may require a login or block automated access.",
+      });
+    }
+
+    // Final safety check — don't generate a PDF full of paywall/CAPTCHA text
+    if (looksPaywalled(article.textContent) || looksLikeCaptcha(article.textContent)) {
+      console.log("Final article still looks paywalled or is a CAPTCHA page — rejecting");
+      return res.status(422).json({
+        error:
+          "Could not bypass the paywall. The article content is behind a login or subscription wall.",
       });
     }
 
