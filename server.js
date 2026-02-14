@@ -6,12 +6,63 @@ const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const FREE_DAILY_LIMIT = 3;
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Trust proxy for correct IP behind reverse proxies
+app.set("trust proxy", 1);
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// --- Rate limiting (in-memory, per-IP, daily reset) ---
+const rateLimits = new Map();
+
+function getRateLimitBucket(ip) {
+  const now = Date.now();
+  let bucket = rateLimits.get(ip);
+
+  // Reset at midnight UTC
+  const resetAt = new Date();
+  resetAt.setUTCHours(24, 0, 0, 0);
+  const resetMs = resetAt.getTime();
+
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: resetMs };
+    rateLimits.set(ip, bucket);
+  }
+
+  return bucket;
+}
+
+// Clean up stale entries every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateLimits) {
+    if (now >= bucket.resetAt) rateLimits.delete(ip);
+  }
+}, 60 * 60 * 1000);
+
+function setRateLimitHeaders(res, bucket) {
+  res.set("X-RateLimit-Limit", String(FREE_DAILY_LIMIT));
+  res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
+  res.set("X-RateLimit-Reset", String(Math.floor(bucket.resetAt / 1000)));
+}
+
+// Expose remaining cages without consuming one
+app.get("/api/usage", (req, res) => {
+  const ip = req.ip;
+  const bucket = getRateLimitBucket(ip);
+  setRateLimitHeaders(res, bucket);
+  res.json({
+    limit: FREE_DAILY_LIMIT,
+    used: bucket.count,
+    remaining: Math.max(0, FREE_DAILY_LIMIT - bucket.count),
+    resetAt: bucket.resetAt,
+  });
+});
 
 // Archive: fetch article and extract readable content
 app.post("/api/archive", async (req, res) => {
@@ -26,6 +77,24 @@ app.post("/api/archive", async (req, res) => {
   } catch {
     return res.status(400).json({ error: "Invalid URL" });
   }
+
+  // Rate limit check
+  const ip = req.ip;
+  const bucket = getRateLimitBucket(ip);
+  setRateLimitHeaders(res, bucket);
+
+  if (bucket.count >= FREE_DAILY_LIMIT) {
+    return res.status(429).json({
+      error: "You've used all 3 free cages for today.",
+      upgrade: true,
+      remaining: 0,
+      resetAt: bucket.resetAt,
+    });
+  }
+
+  // Count this cage
+  bucket.count++;
+  res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
 
   try {
     const response = await fetch(url, {

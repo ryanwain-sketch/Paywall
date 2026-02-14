@@ -14,7 +14,14 @@ const historySection = document.getElementById("history");
 const historyList = document.getElementById("history-list");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
 
+const usageBar = document.getElementById("usage-bar");
+const usageText = document.getElementById("usage-text");
+const usageDots = document.getElementById("usage-dots");
+const upgradeBanner = document.getElementById("upgrade-banner");
+const upgradeBtn = document.getElementById("upgrade-btn");
+
 const STORAGE_KEY = "cage-history";
+const FREE_LIMIT = 3;
 
 let currentArticle = null;
 
@@ -25,9 +32,54 @@ urlInput.addEventListener("keydown", (e) => {
 });
 pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
 clearHistoryBtn.addEventListener("click", clearHistory);
+upgradeBtn.addEventListener("click", () => {
+  // Placeholder — will wire to Stripe Checkout
+  alert("Stripe checkout coming soon! You'll be able to go Pro for $5/mo.");
+});
 
 // --- Init ---
 renderHistory();
+fetchUsage();
+
+// --- Usage ---
+async function fetchUsage() {
+  try {
+    const res = await fetch("/api/usage");
+    const data = await res.json();
+    renderUsage(data.remaining);
+  } catch {
+    // Silently fail — usage bar just stays hidden
+  }
+}
+
+function renderUsage(remaining) {
+  usageBar.hidden = false;
+
+  if (remaining <= 0) {
+    usageText.textContent = "No free cages left today";
+    showUpgradeBanner();
+  } else {
+    usageText.textContent = `${remaining} of ${FREE_LIMIT} free cages left today`;
+    hideUpgradeBanner();
+  }
+
+  // Render dots
+  usageDots.innerHTML = "";
+  for (let i = 0; i < FREE_LIMIT; i++) {
+    const dot = document.createElement("span");
+    dot.className = "usage-dot" + (i < remaining ? " active" : "");
+    usageDots.appendChild(dot);
+  }
+}
+
+function showUpgradeBanner() {
+  upgradeBanner.hidden = false;
+  archiveBtn.disabled = true;
+}
+
+function hideUpgradeBanner() {
+  upgradeBanner.hidden = true;
+}
 
 // --- Archive ---
 async function archive() {
@@ -59,6 +111,17 @@ async function archive() {
     });
 
     const data = await res.json();
+
+    // Update usage from response headers
+    const remaining = res.headers.get("X-RateLimit-Remaining");
+    if (remaining !== null) renderUsage(parseInt(remaining, 10));
+
+    if (res.status === 429) {
+      cageArea.className = "cage-area";
+      cageStatus.textContent = "Paste a URL and cage that page";
+      renderUsage(0);
+      return;
+    }
 
     if (!res.ok) {
       throw new Error(data.error || "Failed to cage article.");

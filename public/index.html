@@ -39,7 +39,28 @@
       <button id="archive-btn" type="button">Cage it!</button>
     </div>
 
+    <div id="usage-bar" class="usage-bar" hidden>
+      <span id="usage-text"></span>
+      <div class="usage-dots" id="usage-dots"></div>
+    </div>
+
     <div id="error-msg" class="error-msg" hidden></div>
+
+    <!-- Upgrade prompt (shown when rate limited) -->
+    <div id="upgrade-banner" class="upgrade-banner" hidden>
+      <div class="upgrade-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
+      <div class="upgrade-body">
+        <strong>You've used your 3 free cages today</strong>
+        <p>Go Pro for unlimited cages, cloud history, and batch export.</p>
+      </div>
+      <button id="upgrade-btn" class="upgrade-btn" type="button">
+        Go Pro &mdash; $5/mo
+      </button>
+    </div>
 
     <!-- Cage animation area (replaces old spinner) -->
     <div id="cage-area" class="cage-area">
