@@ -147,36 +147,51 @@ const ARCHIVE_SOURCES = [
 async function fetchViaArchive(url) {
   for (const buildUrl of ARCHIVE_SOURCES) {
     const archiveUrl = buildUrl(url);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-    try {
-      console.log(`Trying archive: ${archiveUrl}`);
-      const resp = await fetch(archiveUrl, {
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html",
-          Referer: "https://www.google.com/",
-        },
-        redirect: "follow",
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      console.log(`Archive responded: ${resp.status} → ${resp.url}`);
-      if (!resp.ok) continue;
-      const html = await resp.text();
-      const dom = new JSDOM(html, { url: resp.url });
-      const reader = new Readability(dom.window.document);
-      const article = reader.parse();
-      if (article && article.textContent && article.textContent.length > 500) {
-        console.log(`Archive returned article: ${article.textContent.length} chars`);
-        return article;
+
+    // Retry up to 2 times with backoff when rate-limited (429)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      try {
+        if (attempt > 0) console.log(`Archive retry #${attempt}: ${archiveUrl}`);
+        else console.log(`Trying archive: ${archiveUrl}`);
+        const resp = await fetch(archiveUrl, {
+          headers: {
+            "User-Agent": USER_AGENT,
+            Accept: "text/html",
+            Referer: "https://www.google.com/",
+          },
+          redirect: "follow",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        console.log(`Archive responded: ${resp.status} → ${resp.url}`);
+
+        if (resp.status === 429) {
+          const delay = (attempt + 1) * 3000;
+          console.log(`Archive rate-limited (429), waiting ${delay}ms before retry…`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        if (!resp.ok) break; // non-429 error → try next archive source
+
+        const html = await resp.text();
+        const dom = new JSDOM(html, { url: resp.url });
+        const reader = new Readability(dom.window.document);
+        const article = reader.parse();
+        if (article && article.textContent && article.textContent.length > 500) {
+          console.log(`Archive returned article: ${article.textContent.length} chars`);
+          return article;
+        }
+        console.log(
+          `Archive returned insufficient content (${article?.textContent?.length || 0} chars)`
+        );
+        break; // got a response but content was bad → try next source
+      } catch (err) {
+        clearTimeout(timeout);
+        console.error(`Archive fetch failed: ${err.message}`);
+        break;
       }
-      console.log(
-        `Archive returned insufficient content (${article?.textContent?.length || 0} chars)`
-      );
-    } catch (err) {
-      clearTimeout(timeout);
-      console.error(`Archive fetch failed: ${err.message}`);
     }
   }
   return null;
@@ -186,13 +201,40 @@ async function fetchViaArchive(url) {
 let _browser = null;
 let _browserFailed = false;
 
+function findChromiumPath() {
+  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
+
+  // Scan the Playwright cache for any installed Chromium version
+  const fs = require("fs");
+  const cacheDir = path.join(
+    process.env.HOME || "/root",
+    ".cache",
+    "ms-playwright"
+  );
+  try {
+    const entries = fs.readdirSync(cacheDir).filter((e) => e.startsWith("chromium"));
+    entries.sort().reverse(); // prefer newest version
+    for (const entry of entries) {
+      const candidate = path.join(cacheDir, entry, "chrome-linux", "chrome");
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch { /* cache dir doesn't exist */ }
+
+  return null;
+}
+
 async function getBrowser() {
   if (_browserFailed) return null;
   if (_browser && _browser.isConnected()) return _browser;
   try {
-    const executablePath =
-      process.env.CHROMIUM_PATH ||
-      "/root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome";
+    const executablePath = findChromiumPath();
+    if (!executablePath) {
+      console.warn(
+        "Chromium not found. Run: npx playwright install chromium"
+      );
+      _browserFailed = true;
+      return null;
+    }
     _browser = await chromium.launch({
       executablePath,
       headless: true,
