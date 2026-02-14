@@ -611,10 +611,27 @@ app.post("/api/archive", async (req, res) => {
   try {
     let article = null;
 
+    // Helper: fetch with a timeout (prevents hanging on consent-redirect sites like Telegraph)
+    function fetchWithTimeout(fetchUrl, options = {}, ms = 15000) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), ms);
+      return fetch(fetchUrl, { ...options, signal: controller.signal })
+        .finally(() => clearTimeout(timeout));
+    }
+
+    // GDPR consent cookies — bypass consent-gate redirects (Telegraph, etc.)
+    const consentCookies = [
+      "euconsent-v2=CPzqYkAPzqYkAAHABBENDICgAAAAAAAAACiQAAAAAAAA",
+      "CookieConsent=true",
+      "gdpr_consent=1",
+      "notice_behavior=expressed,eu",
+      "notice_gdpr_prefs=0,1,2:1a8b5228dd",
+    ].join("; ");
+
     // Step 1: Plain HTTP fetch + JSON-LD extraction (fast, works for most sites)
     console.log(`Step 1 — plain fetch: ${url}`);
     let rawHtml = null;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         "User-Agent": USER_AGENT,
         Accept:
@@ -622,6 +639,7 @@ app.post("/api/archive", async (req, res) => {
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
         Referer: "https://www.google.com/",
+        Cookie: consentCookies,
       },
       redirect: "follow",
     });
@@ -673,14 +691,15 @@ app.post("/api/archive", async (req, res) => {
       const crawlerResults = await Promise.all(
         crawlerUAs.map(async ({ label, ua, referer }) => {
           try {
-            const resp = await fetch(url, {
+            const resp = await fetchWithTimeout(url, {
               headers: {
                 "User-Agent": ua,
                 Accept: "text/html",
                 Referer: referer,
+                Cookie: consentCookies,
               },
               redirect: "follow",
-            });
+            }, 12000);
             if (!resp.ok) return null;
             const html = await resp.text();
             // Try JSON-LD first (might have full article hidden in structured data)
