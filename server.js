@@ -144,57 +144,125 @@ const ARCHIVE_SOURCES = [
   (url) => `https://archive.today/newest/${url}`,
 ];
 
+// Helper: parse readable article from HTML string
+function parseArticleFromHtml(html, pageUrl) {
+  const dom = new JSDOM(html, { url: pageUrl });
+  const reader = new Readability(dom.window.document);
+  return reader.parse();
+}
+
+// Helper: fetch a single URL and return article if content is sufficient
+async function tryFetchArchiveUrl(fetchUrl, label) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    console.log(`${label}: ${fetchUrl}`);
+    const resp = await fetch(fetchUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html",
+        Referer: "https://www.google.com/",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    console.log(`${label} responded: ${resp.status} → ${resp.url}`);
+
+    if (!resp.ok) return { article: null, status: resp.status, resolvedUrl: resp.url };
+
+    const html = await resp.text();
+    const article = parseArticleFromHtml(html, resp.url);
+    if (article && article.textContent && article.textContent.length > 500) {
+      console.log(`${label} returned article: ${article.textContent.length} chars`);
+      return { article, status: resp.status, resolvedUrl: resp.url };
+    }
+    console.log(`${label} returned insufficient content (${article?.textContent?.length || 0} chars)`);
+    return { article: null, status: resp.status, resolvedUrl: resp.url };
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error(`${label} failed: ${err.message}`);
+    return { article: null, status: 0, resolvedUrl: null };
+  }
+}
+
+// Detect if a URL looks like a direct archive snapshot (contains a timestamp)
+function isSnapshotUrl(url) {
+  return /archive\.\w+\/\d{14}\//.test(url);
+}
+
 async function fetchViaArchive(url) {
+  // Collect any snapshot URLs discovered from 429 redirects
+  const snapshotUrls = new Set();
+
   for (const buildUrl of ARCHIVE_SOURCES) {
     const archiveUrl = buildUrl(url);
 
-    // Retry up to 2 times with backoff when rate-limited (429)
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
-      try {
-        if (attempt > 0) console.log(`Archive retry #${attempt}: ${archiveUrl}`);
-        else console.log(`Trying archive: ${archiveUrl}`);
-        const resp = await fetch(archiveUrl, {
-          headers: {
-            "User-Agent": USER_AGENT,
-            Accept: "text/html",
-            Referer: "https://www.google.com/",
-          },
-          redirect: "follow",
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        console.log(`Archive responded: ${resp.status} → ${resp.url}`);
+    // Retry up to 3 times with backoff when rate-limited (429)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const label = attempt > 0 ? `Archive retry #${attempt}` : "Trying archive";
+      const { article, status, resolvedUrl } = await tryFetchArchiveUrl(archiveUrl, label);
 
-        if (resp.status === 429) {
-          const delay = (attempt + 1) * 3000;
-          console.log(`Archive rate-limited (429), waiting ${delay}ms before retry…`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-        if (!resp.ok) break; // non-429 error → try next archive source
+      if (article) return article;
 
-        const html = await resp.text();
-        const dom = new JSDOM(html, { url: resp.url });
-        const reader = new Readability(dom.window.document);
-        const article = reader.parse();
-        if (article && article.textContent && article.textContent.length > 500) {
-          console.log(`Archive returned article: ${article.textContent.length} chars`);
-          return article;
+      if (status === 429) {
+        // If the 429 redirected to a snapshot URL, save it for later
+        if (resolvedUrl && isSnapshotUrl(resolvedUrl)) {
+          snapshotUrls.add(resolvedUrl);
+          console.log(`Discovered snapshot URL from 429 redirect: ${resolvedUrl}`);
         }
-        console.log(
-          `Archive returned insufficient content (${article?.textContent?.length || 0} chars)`
-        );
-        break; // got a response but content was bad → try next source
-      } catch (err) {
-        clearTimeout(timeout);
-        console.error(`Archive fetch failed: ${err.message}`);
-        break;
+        const delay = (attempt + 1) * 4000;
+        console.log(`Archive rate-limited (429), waiting ${delay}ms before retry…`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
       }
+      break; // non-429 error → try next archive source
     }
   }
+
+  // Try any snapshot URLs we discovered from 429 redirects
+  for (const snapUrl of snapshotUrls) {
+    console.log(`Trying discovered snapshot URL directly…`);
+    const { article } = await tryFetchArchiveUrl(snapUrl, "Snapshot fetch");
+    if (article) return article;
+  }
+
   return null;
+}
+
+// --- Google webcache fallback ---
+async function fetchViaWebcache(url) {
+  const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(url)}&strip=0`;
+  console.log(`Trying Google webcache: ${cacheUrl}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(cacheUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) {
+      console.log(`Google webcache responded: ${resp.status}`);
+      return null;
+    }
+    const html = await resp.text();
+    const article = parseArticleFromHtml(html, url);
+    if (article && article.textContent && article.textContent.length > 500) {
+      console.log(`Google webcache returned article: ${article.textContent.length} chars`);
+      return article;
+    }
+    console.log(`Google webcache returned insufficient content (${article?.textContent?.length || 0} chars)`);
+    return null;
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error(`Google webcache fetch failed: ${err.message}`);
+    return null;
+  }
 }
 
 // --- Headless browser helpers (optional, for environments with Chromium) ---
@@ -524,6 +592,19 @@ app.post("/api/archive", async (req, res) => {
         (!article || archived.textContent.length > article.textContent.length)
       ) {
         article = archived;
+      }
+    }
+
+    // Step 2b: Google webcache fallback
+    if (!article || looksPaywalled(article.textContent)) {
+      console.log("Step 2b — Google webcache fallback");
+      const cached = await fetchViaWebcache(url);
+      if (
+        cached &&
+        cached.textContent &&
+        (!article || cached.textContent.length > article.textContent.length)
+      ) {
+        article = cached;
       }
     }
 
