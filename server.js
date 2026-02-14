@@ -344,6 +344,9 @@ app.post("/api/archive", async (req, res) => {
   }
 
   try {
+    let article = null;
+
+    // Try direct fetch first
     const response = await fetch(url, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -356,18 +359,14 @@ app.post("/api/archive", async (req, res) => {
       redirect: "follow",
     });
 
-    if (!response.ok) {
-      return res
-        .status(502)
-        .json({ error: `Failed to fetch URL (HTTP ${response.status})` });
+    if (response.ok) {
+      const html = await response.text();
+      const dom = new JSDOM(html, { url });
+      const reader = new Readability(dom.window.document);
+      article = reader.parse();
     }
 
-    const html = await response.text();
-    const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document);
-    let article = reader.parse();
-
-    // If content looks paywalled, try archive.ph as fallback
+    // Fall back to archive.ph if direct fetch failed, returned no content, or hit a paywall
     if (!article || looksPaywalled(article.textContent)) {
       const archived = await fetchViaArchive(url);
       if (
@@ -380,9 +379,11 @@ app.post("/api/archive", async (req, res) => {
     }
 
     if (!article) {
-      return res
-        .status(422)
-        .json({ error: "Could not extract article content from this URL" });
+      const status = response.ok ? 422 : 502;
+      const message = response.ok
+        ? "Could not extract article content from this URL"
+        : `Failed to fetch URL (HTTP ${response.status})`;
+      return res.status(status).json({ error: message });
     }
 
     // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
