@@ -4,7 +4,7 @@ const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-core");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -138,94 +138,33 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
-// --- Headless browser helpers ---
-let _browser = null;
-
-async function getBrowser() {
-  if (_browser && _browser.isConnected()) return _browser;
-  _browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-  return _browser;
-}
-
-// Fetch a URL with a real headless browser (bypasses 403s and JS-gated content)
-async function fetchWithBrowser(targetUrl) {
-  let browser;
-  try {
-    browser = await getBrowser();
-  } catch (err) {
-    console.error("Failed to launch browser:", err.message);
-    return null;
-  }
-
-  let page;
-  try {
-    page = await browser.newPage();
-    // Look like a normal user coming from Google
-    await page.setExtraHTTPHeaders({ Referer: "https://www.google.com/" });
-    console.log(`Browser fetch: ${targetUrl}`);
-    const resp = await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-    if (!resp || resp.status() >= 400) {
-      console.log(`Browser fetch responded: ${resp?.status() || "no response"}`);
-      return null;
-    }
-    // Let JS-rendered content settle
-    await page.waitForTimeout(2000);
-    const html = await page.content();
-    console.log(`Browser fetch loaded: ${page.url()} (${html.length} bytes)`);
-
-    const dom = new JSDOM(html, { url: page.url() });
-    const reader = new Readability(dom.window.document);
-    return reader.parse();
-  } catch (err) {
-    console.error(`Browser fetch failed: ${err.message}`);
-    return null;
-  } finally {
-    if (page) await page.close().catch(() => {});
-  }
-}
-
-// Try archive.ph / archive.today as last resort
-const ARCHIVE_URLS = [
+// --- Archive fallback via plain HTTP (works through proxies) ---
+const ARCHIVE_SOURCES = [
   (url) => `https://archive.ph/newest/${url}`,
   (url) => `https://archive.today/newest/${url}`,
 ];
 
 async function fetchViaArchive(url) {
-  let browser;
-  try {
-    browser = await getBrowser();
-  } catch (err) {
-    console.error("Failed to launch browser:", err.message);
-    return null;
-  }
-
-  for (const buildUrl of ARCHIVE_URLS) {
+  for (const buildUrl of ARCHIVE_SOURCES) {
     const archiveUrl = buildUrl(url);
-    let page;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
     try {
-      page = await browser.newPage();
       console.log(`Trying archive: ${archiveUrl}`);
-      const resp = await page.goto(archiveUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
+      const resp = await fetch(archiveUrl, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html",
+          Referer: "https://www.google.com/",
+        },
+        redirect: "follow",
+        signal: controller.signal,
       });
-      if (!resp || resp.status() >= 400) {
-        console.log(`Archive responded: ${resp?.status() || "no response"}`);
-        continue;
-      }
-      // Wait for Cloudflare challenge or JS content to settle
-      await page.waitForTimeout(3000);
-      const html = await page.content();
-      const finalUrl = page.url();
-      console.log(`Archive loaded: ${finalUrl} (${html.length} bytes)`);
-
-      const dom = new JSDOM(html, { url: finalUrl });
+      clearTimeout(timeout);
+      console.log(`Archive responded: ${resp.status} → ${resp.url}`);
+      if (!resp.ok) continue;
+      const html = await resp.text();
+      const dom = new JSDOM(html, { url: resp.url });
       const reader = new Readability(dom.window.document);
       const article = reader.parse();
       if (article && article.textContent && article.textContent.length > 500) {
@@ -236,12 +175,66 @@ async function fetchViaArchive(url) {
         `Archive returned insufficient content (${article?.textContent?.length || 0} chars)`
       );
     } catch (err) {
+      clearTimeout(timeout);
       console.error(`Archive fetch failed: ${err.message}`);
-    } finally {
-      if (page) await page.close().catch(() => {});
     }
   }
   return null;
+}
+
+// --- Headless browser helpers (optional, for environments with Chromium) ---
+let _browser = null;
+let _browserFailed = false;
+
+async function getBrowser() {
+  if (_browserFailed) return null;
+  if (_browser && _browser.isConnected()) return _browser;
+  try {
+    const executablePath =
+      process.env.CHROMIUM_PATH ||
+      "/root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome";
+    _browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    return _browser;
+  } catch (err) {
+    console.warn("Chromium unavailable, skipping browser fetch:", err.message);
+    _browserFailed = true;
+    return null;
+  }
+}
+
+async function fetchWithBrowser(targetUrl) {
+  const browser = await getBrowser();
+  if (!browser) return null;
+
+  let page;
+  try {
+    page = await browser.newPage();
+    await page.setExtraHTTPHeaders({ Referer: "https://www.google.com/" });
+    console.log(`Browser fetch: ${targetUrl}`);
+    const resp = await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    if (!resp || resp.status() >= 400) {
+      console.log(`Browser fetch responded: ${resp?.status() || "no response"}`);
+      return null;
+    }
+    await page.waitForTimeout(2000);
+    const html = await page.content();
+    console.log(`Browser fetch loaded: ${page.url()} (${html.length} bytes)`);
+    const dom = new JSDOM(html, { url: page.url() });
+    const reader = new Readability(dom.window.document);
+    return reader.parse();
+  } catch (err) {
+    console.error(`Browser fetch failed: ${err.message}`);
+    return null;
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
 }
 
 // --- Pro cookie helpers ---
@@ -450,22 +443,38 @@ app.post("/api/archive", async (req, res) => {
       article = reader.parse();
     }
 
-    // Step 2: Headless browser direct fetch (handles 403s and JS-gated paywalls)
+    // Step 1b: Retry with Googlebot UA (many sites serve full content for SEO)
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 2 — browser direct fetch");
-      const browserArticle = await fetchWithBrowser(url);
-      if (
-        browserArticle &&
-        browserArticle.textContent &&
-        (!article || browserArticle.textContent.length > article.textContent.length)
-      ) {
-        article = browserArticle;
+      console.log("Step 1b — Googlebot UA fetch");
+      try {
+        const gbResp = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            Accept: "text/html",
+          },
+          redirect: "follow",
+        });
+        if (gbResp.ok) {
+          const gbHtml = await gbResp.text();
+          const gbDom = new JSDOM(gbHtml, { url });
+          const gbArticle = new Readability(gbDom.window.document).parse();
+          if (
+            gbArticle &&
+            gbArticle.textContent &&
+            (!article || gbArticle.textContent.length > article.textContent.length)
+          ) {
+            article = gbArticle;
+          }
+        }
+      } catch (err) {
+        console.error("Googlebot fetch failed:", err.message);
       }
     }
 
-    // Step 3: Archive.ph as last resort (may hit CAPTCHA)
+    // Step 2: Archive.ph via plain HTTP fetch
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 3 — archive.ph fallback");
+      console.log("Step 2 — archive.ph fallback");
       const archived = await fetchViaArchive(url);
       if (
         archived &&
@@ -473,6 +482,19 @@ app.post("/api/archive", async (req, res) => {
         (!article || archived.textContent.length > article.textContent.length)
       ) {
         article = archived;
+      }
+    }
+
+    // Step 3: Headless browser direct fetch (optional, needs Chromium)
+    if (!article || looksPaywalled(article.textContent)) {
+      console.log("Step 3 — browser direct fetch");
+      const browserArticle = await fetchWithBrowser(url);
+      if (
+        browserArticle &&
+        browserArticle.textContent &&
+        (!article || browserArticle.textContent.length > article.textContent.length)
+      ) {
+        article = browserArticle;
       }
     }
 
