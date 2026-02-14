@@ -82,6 +82,52 @@ app.use(express.static(path.join(__dirname, "public")));
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+// --- Paywall detection ---
+const PAYWALL_SIGNALS = [
+  "subscribe to unlock",
+  "subscribe to read",
+  "subscription required",
+  "sign in to read",
+  "register to read",
+  "for subscribers only",
+  "start your free trial",
+  "create a free account",
+  "already a subscriber",
+  "continue reading with",
+  "paywall",
+  "premium content",
+];
+
+function looksPaywalled(text) {
+  if (!text || text.length < 500) return true;
+  const lower = text.toLowerCase();
+  return PAYWALL_SIGNALS.some((s) => lower.includes(s));
+}
+
+// --- Archive.ph fallback ---
+async function fetchViaArchive(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const archiveUrl = `https://archive.ph/newest/${url}`;
+    const resp = await fetch(archiveUrl, {
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const dom = new JSDOM(html, { url: resp.url });
+    const reader = new Readability(dom.window.document);
+    return reader.parse();
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error("Archive.ph fetch failed:", err.message);
+    return null;
+  }
+}
+
 // --- Pro cookie helpers ---
 function signCookie(customerId) {
   const hmac = crypto.createHmac("sha256", COOKIE_SECRET);
@@ -272,6 +318,7 @@ app.post("/api/archive", async (req, res) => {
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
+        Referer: "https://www.google.com/",
       },
       redirect: "follow",
     });
@@ -285,7 +332,19 @@ app.post("/api/archive", async (req, res) => {
     const html = await response.text();
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
-    const article = reader.parse();
+    let article = reader.parse();
+
+    // If content looks paywalled, try archive.ph as fallback
+    if (!article || looksPaywalled(article.textContent)) {
+      const archived = await fetchViaArchive(url);
+      if (
+        archived &&
+        archived.textContent &&
+        (!article || archived.textContent.length > article.textContent.length)
+      ) {
+        article = archived;
+      }
+    }
 
     if (!article) {
       return res
