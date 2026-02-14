@@ -18,6 +18,7 @@ const usageBar = document.getElementById("usage-bar");
 const usageText = document.getElementById("usage-text");
 const usageDots = document.getElementById("usage-dots");
 const upgradeBanner = document.getElementById("upgrade-banner");
+const upgradeTitle = document.getElementById("upgrade-title");
 const upgradeBtn = document.getElementById("upgrade-btn");
 
 const STORAGE_KEY = "cage-history";
@@ -91,7 +92,7 @@ function renderUsage(remaining) {
 
   if (remaining <= 0) {
     usageText.textContent = "No free cages left today";
-    showUpgradeBanner();
+    showUpgradeBanner(FREE_LIMIT - remaining);
   } else {
     usageText.textContent = `${remaining} of ${FREE_LIMIT} free cages left today`;
     hideUpgradeBanner();
@@ -106,7 +107,12 @@ function renderUsage(remaining) {
   }
 }
 
-function showUpgradeBanner() {
+function showUpgradeBanner(used) {
+  const count = used ?? FREE_LIMIT;
+  upgradeTitle.textContent =
+    count === 0
+      ? "Go Pro for unlimited cages"
+      : `You've used your ${count} free cage${count === 1 ? "" : "s"} today`;
   upgradeBanner.hidden = false;
   archiveBtn.disabled = true;
 }
