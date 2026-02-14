@@ -4,7 +4,6 @@ const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 const path = require("path");
-const { chromium } = require("playwright-core");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -192,39 +191,18 @@ function isSnapshotUrl(url) {
 }
 
 async function fetchViaArchive(url) {
-  // Collect any snapshot URLs discovered from 429 redirects
-  const snapshotUrls = new Set();
-
   for (const buildUrl of ARCHIVE_SOURCES) {
     const archiveUrl = buildUrl(url);
 
-    // Retry up to 3 times with backoff when rate-limited (429)
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const label = attempt > 0 ? `Archive retry #${attempt}` : "Trying archive";
-      const { article, status, resolvedUrl } = await tryFetchArchiveUrl(archiveUrl, label);
-
-      if (article) return article;
-
-      if (status === 429) {
-        // If the 429 redirected to a snapshot URL, save it for later
-        if (resolvedUrl && isSnapshotUrl(resolvedUrl)) {
-          snapshotUrls.add(resolvedUrl);
-          console.log(`Discovered snapshot URL from 429 redirect: ${resolvedUrl}`);
-        }
-        const delay = (attempt + 1) * 4000;
-        console.log(`Archive rate-limited (429), waiting ${delay}ms before retry…`);
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      break; // non-429 error → try next archive source
-    }
-  }
-
-  // Try any snapshot URLs we discovered from 429 redirects
-  for (const snapUrl of snapshotUrls) {
-    console.log(`Trying discovered snapshot URL directly…`);
-    const { article } = await tryFetchArchiveUrl(snapUrl, "Snapshot fetch");
+    const { article, status, resolvedUrl } = await tryFetchArchiveUrl(archiveUrl, "Trying archive");
     if (article) return article;
+
+    // If 429 redirected to a snapshot URL, try it immediately
+    if (status === 429 && resolvedUrl && isSnapshotUrl(resolvedUrl)) {
+      console.log(`Got snapshot URL from redirect, trying immediately: ${resolvedUrl}`);
+      const snap = await tryFetchArchiveUrl(resolvedUrl, "Snapshot fetch");
+      if (snap.article) return snap.article;
+    }
   }
 
   return null;
@@ -262,88 +240,6 @@ async function fetchViaWebcache(url) {
     clearTimeout(timeout);
     console.error(`Google webcache fetch failed: ${err.message}`);
     return null;
-  }
-}
-
-// --- Headless browser helpers (optional, for environments with Chromium) ---
-let _browser = null;
-let _browserFailed = false;
-
-function findChromiumPath() {
-  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
-
-  // Scan the Playwright cache for any installed Chromium version
-  const fs = require("fs");
-  const cacheDir = path.join(
-    process.env.HOME || "/root",
-    ".cache",
-    "ms-playwright"
-  );
-  try {
-    const entries = fs.readdirSync(cacheDir).filter((e) => e.startsWith("chromium"));
-    entries.sort().reverse(); // prefer newest version
-    for (const entry of entries) {
-      const candidate = path.join(cacheDir, entry, "chrome-linux", "chrome");
-      if (fs.existsSync(candidate)) return candidate;
-    }
-  } catch { /* cache dir doesn't exist */ }
-
-  return null;
-}
-
-async function getBrowser() {
-  if (_browserFailed) return null;
-  if (_browser && _browser.isConnected()) return _browser;
-  try {
-    const executablePath = findChromiumPath();
-    if (!executablePath) {
-      console.warn(
-        "Chromium not found. Run: npx playwright install chromium"
-      );
-      _browserFailed = true;
-      return null;
-    }
-    _browser = await chromium.launch({
-      executablePath,
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-    return _browser;
-  } catch (err) {
-    console.warn("Chromium unavailable, skipping browser fetch:", err.message);
-    _browserFailed = true;
-    return null;
-  }
-}
-
-async function fetchWithBrowser(targetUrl) {
-  const browser = await getBrowser();
-  if (!browser) return null;
-
-  let page;
-  try {
-    page = await browser.newPage();
-    await page.setExtraHTTPHeaders({ Referer: "https://www.google.com/" });
-    console.log(`Browser fetch: ${targetUrl}`);
-    const resp = await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-    if (!resp || resp.status() >= 400) {
-      console.log(`Browser fetch responded: ${resp?.status() || "no response"}`);
-      return null;
-    }
-    await page.waitForTimeout(2000);
-    const html = await page.content();
-    console.log(`Browser fetch loaded: ${page.url()} (${html.length} bytes)`);
-    const dom = new JSDOM(html, { url: page.url() });
-    const reader = new Readability(dom.window.document);
-    return reader.parse();
-  } catch (err) {
-    console.error(`Browser fetch failed: ${err.message}`);
-    return null;
-  } finally {
-    if (page) await page.close().catch(() => {});
   }
 }
 
@@ -582,42 +478,23 @@ app.post("/api/archive", async (req, res) => {
       }
     }
 
-    // Step 2: Archive.ph via plain HTTP fetch
+    // Step 2: Archive.ph + Google webcache in parallel
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 2 — archive.ph fallback");
-      const archived = await fetchViaArchive(url);
-      if (
-        archived &&
-        archived.textContent &&
-        (!article || archived.textContent.length > article.textContent.length)
-      ) {
-        article = archived;
-      }
-    }
+      console.log("Step 2 — archive.ph + webcache (parallel)");
+      const [archived, cached] = await Promise.all([
+        fetchViaArchive(url),
+        fetchViaWebcache(url),
+      ]);
 
-    // Step 2b: Google webcache fallback
-    if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 2b — Google webcache fallback");
-      const cached = await fetchViaWebcache(url);
-      if (
-        cached &&
-        cached.textContent &&
-        (!article || cached.textContent.length > article.textContent.length)
-      ) {
-        article = cached;
-      }
-    }
-
-    // Step 3: Headless browser direct fetch (optional, needs Chromium)
-    if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 3 — browser direct fetch");
-      const browserArticle = await fetchWithBrowser(url);
-      if (
-        browserArticle &&
-        browserArticle.textContent &&
-        (!article || browserArticle.textContent.length > article.textContent.length)
-      ) {
-        article = browserArticle;
+      // Pick whichever returned the most content
+      for (const candidate of [archived, cached]) {
+        if (
+          candidate &&
+          candidate.textContent &&
+          (!article || candidate.textContent.length > article.textContent.length)
+        ) {
+          article = candidate;
+        }
       }
     }
 
