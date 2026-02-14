@@ -145,7 +145,7 @@ header h1 {
   height: 120px;
 }
 
-/* Page document icon — always visible, centered */
+/* Page document icon — always visible, centered, behind cage */
 .page-doc {
   position: absolute;
   bottom: 8px;
@@ -154,6 +154,7 @@ header h1 {
   width: 44px;
   color: var(--border);
   transition: color 0.4s;
+  z-index: 1;
 }
 
 .page-doc svg {
@@ -161,7 +162,7 @@ header h1 {
   height: auto;
 }
 
-/* Cage bars — hidden by default, drops in on fetch */
+/* Cage bars — hidden by default, drops in on fetch, renders in front of page */
 .cage-bars {
   position: absolute;
   top: -50px;
@@ -172,6 +173,7 @@ header h1 {
   opacity: 0;
   transition: top 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s, color 0.4s;
   pointer-events: none;
+  z-index: 2;
 }
 
 .cage-bars svg {
