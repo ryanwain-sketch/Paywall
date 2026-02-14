@@ -3,16 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Web Archiver — Save Articles as PDF</title>
+  <title>Cage that Page — Capture any article as PDF</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Web Archiver</h1>
-      <p class="subtitle">Paste an article URL, get a clean PDF to share.</p>
+      <div class="logo">
+        <!-- Cage logo icon -->
+        <svg class="logo-icon" viewBox="0 0 40 48" fill="none">
+          <path d="M8 18 Q20 4 32 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="20" cy="7" r="2.5" stroke="currentColor" stroke-width="2" fill="none"/>
+          <line x1="8" y1="18" x2="8" y2="42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="16" y1="12" x2="16" y2="42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="24" y1="12" x2="24" y2="42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="32" y1="18" x2="32" y2="42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="6" y1="42" x2="34" y2="42" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <line x1="8" y1="30" x2="32" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+        </svg>
+        <h1>Cage that Page</h1>
+      </div>
+      <p class="subtitle">Capture any article. Get a clean PDF. Share it anywhere.</p>
     </header>
 
     <div class="input-group">
@@ -23,17 +36,41 @@
         autocomplete="off"
         spellcheck="false"
       >
-      <button id="archive-btn" type="button">
-        Archive
-      </button>
+      <button id="archive-btn" type="button">Cage it!</button>
     </div>
 
     <div id="error-msg" class="error-msg" hidden></div>
 
-    <!-- Loading state -->
-    <div id="loading" class="loading" hidden>
-      <div class="spinner"></div>
-      <p id="loading-text">Fetching article...</p>
+    <!-- Cage animation area (replaces old spinner) -->
+    <div id="cage-area" class="cage-area">
+      <div class="cage-scene">
+        <!-- Cage bars — drops from above when fetching -->
+        <div class="cage-bars" id="cage-bars">
+          <svg viewBox="0 0 80 90" fill="none">
+            <path d="M10 28 Q40 4 70 28" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="40" cy="8" r="3.5" stroke="currentColor" stroke-width="2.5" fill="none"/>
+            <line x1="10" y1="28" x2="10" y2="78" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            <line x1="22" y1="18" x2="22" y2="78" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="34" y1="14" x2="34" y2="78" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="46" y1="14" x2="46" y2="78" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="58" y1="18" x2="58" y2="78" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="70" y1="28" x2="70" y2="78" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            <line x1="8" y1="78" x2="72" y2="78" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="10" y1="50" x2="70" y2="50" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+          </svg>
+        </div>
+        <!-- Page document — always visible, static -->
+        <div class="page-doc" id="page-doc">
+          <svg viewBox="0 0 36 44" fill="none">
+            <path d="M3 3 H24 L33 12 V41 H3 Z" fill="#fff" stroke="currentColor" stroke-width="2.5"/>
+            <path d="M24 3 V12 H33" fill="none" stroke="currentColor" stroke-width="2.5"/>
+            <line x1="9" y1="20" x2="27" y2="20" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+            <line x1="9" y1="26" x2="27" y2="26" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+            <line x1="9" y1="32" x2="21" y2="32" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+          </svg>
+        </div>
+      </div>
+      <p class="cage-status" id="cage-status">Paste a URL and cage that page</p>
     </div>
 
     <!-- Article preview + PDF download -->
@@ -53,7 +90,7 @@
         </svg>
         <span class="pdf-btn-text">
           <strong>Download PDF</strong>
-          <small>Ready to share</small>
+          <small>Your page is caged and ready</small>
         </span>
       </button>
     </div>

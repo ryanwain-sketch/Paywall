@@ -1,7 +1,7 @@
 const urlInput = document.getElementById("url-input");
 const archiveBtn = document.getElementById("archive-btn");
-const loading = document.getElementById("loading");
-const loadingText = document.getElementById("loading-text");
+const cageArea = document.getElementById("cage-area");
+const cageStatus = document.getElementById("cage-status");
 const errorMsg = document.getElementById("error-msg");
 const result = document.getElementById("result");
 const pdfBtn = document.getElementById("pdf-btn");
@@ -34,9 +34,11 @@ async function archive() {
 
   hideError();
   result.hidden = true;
-  loading.hidden = false;
-  loadingText.textContent = "Fetching article...";
   archiveBtn.disabled = true;
+
+  // Start cage-drop animation
+  cageArea.className = "cage-area caging";
+  cageStatus.textContent = "Caging that page\u2026";
 
   try {
     const res = await fetch("/api/archive", {
@@ -48,7 +50,7 @@ async function archive() {
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.error || "Failed to archive article.");
+      throw new Error(data.error || "Failed to cage article.");
     }
 
     currentArticle = { ...data, sourceUrl: url };
@@ -57,13 +59,17 @@ async function archive() {
     const metaParts = [];
     if (data.byline) metaParts.push(data.byline);
     if (data.siteName) metaParts.push(data.siteName);
-    articleMeta.textContent = metaParts.join(" — ");
+    articleMeta.textContent = metaParts.join(" \u2014 ");
     articleExcerpt.textContent = data.excerpt || "";
 
-    loading.hidden = true;
+    // Success — page is caged
+    cageArea.className = "cage-area caged";
+    cageStatus.textContent = "Page caged!";
     result.hidden = false;
   } catch (err) {
-    loading.hidden = true;
+    // Reset cage to idle
+    cageArea.className = "cage-area";
+    cageStatus.textContent = "Paste a URL and cage that page";
     showError(err.message);
   } finally {
     archiveBtn.disabled = false;
@@ -76,7 +82,7 @@ async function downloadPdf() {
   pdfBtn.disabled = true;
   const btnText = pdfBtn.querySelector(".pdf-btn-text strong");
   const origText = btnText.textContent;
-  btnText.textContent = "Generating PDF...";
+  btnText.textContent = "Generating PDF\u2026";
 
   try {
     const res = await fetch("/api/pdf", {

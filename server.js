@@ -186,7 +186,7 @@ app.post("/api/pdf", async (req, res) => {
       .font("Helvetica")
       .fontSize(8)
       .fillColor("#aaaaaa")
-      .text(`Archived with Web Archiver — PDF generated ${dateStr}`, {
+      .text(`Caged by Cage that Page — PDF generated ${dateStr}`, {
         align: "center",
       });
 
@@ -198,5 +198,5 @@ app.post("/api/pdf", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Web Archiver running at http://localhost:${PORT}`);
+  console.log(`Cage that Page running at http://localhost:${PORT}`);
 });
