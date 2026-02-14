@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Archiver — Save Articles as PDF</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Web Archiver</h1>
+      <p class="subtitle">Paste an article URL, get a clean PDF to share.</p>
+    </header>
+
+    <div class="input-group">
+      <input
+        type="url"
+        id="url-input"
+        placeholder="https://example.com/article..."
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button id="archive-btn" type="button">
+        Archive
+      </button>
+    </div>
+
+    <div id="error-msg" class="error-msg" hidden></div>
+
+    <!-- Loading state -->
+    <div id="loading" class="loading" hidden>
+      <div class="spinner"></div>
+      <p id="loading-text">Fetching article...</p>
+    </div>
+
+    <!-- Article preview + PDF download -->
+    <div id="result" class="result" hidden>
+      <div class="article-preview">
+        <h2 id="article-title"></h2>
+        <p id="article-meta" class="article-meta"></p>
+        <div id="article-excerpt" class="article-excerpt"></div>
+      </div>
+
+      <button id="pdf-btn" class="pdf-btn" type="button">
+        <svg class="pdf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <polyline points="9 15 12 18 15 15"/>
+        </svg>
+        <span class="pdf-btn-text">
+          <strong>Download PDF</strong>
+          <small>Ready to share</small>
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
