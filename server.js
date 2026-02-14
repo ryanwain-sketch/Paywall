@@ -160,10 +160,98 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
+// --- JSON-LD / structured data extraction ---
+// Many news sites embed full article text in JSON-LD even on paywalled pages
+function extractArticleFromJsonLd(html, pageUrl) {
+  try {
+    const dom = new JSDOM(html, { url: pageUrl });
+    const scripts = dom.window.document.querySelectorAll(
+      'script[type="application/ld+json"]'
+    );
+    for (const script of scripts) {
+      try {
+        let data = JSON.parse(script.textContent);
+        // Some sites wrap in an array
+        if (Array.isArray(data)) data = data[0];
+        // Look for article types with articleBody
+        if (
+          data &&
+          data.articleBody &&
+          (data["@type"] === "NewsArticle" ||
+            data["@type"] === "Article" ||
+            data["@type"] === "WebPage" ||
+            data["@type"] === "ReportageNewsArticle" ||
+            Array.isArray(data["@type"]))
+        ) {
+          const body = data.articleBody;
+          if (body.length > 500) {
+            console.log(
+              `JSON-LD extraction found articleBody: ${body.length} chars`
+            );
+            return {
+              title: data.headline || data.name || null,
+              content: `<p>${body.replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>`,
+              textContent: body,
+              byline: data.author
+                ? Array.isArray(data.author)
+                  ? data.author.map((a) => a.name || a).join(", ")
+                  : data.author.name || data.author
+                : null,
+              siteName: data.publisher?.name || null,
+            };
+          }
+        }
+      } catch (_) {
+        // Invalid JSON in one script tag — try the next
+      }
+    }
+
+    // Also check for __NEXT_DATA__ (Next.js sites)
+    const nextDataScript = dom.window.document.querySelector(
+      "#__NEXT_DATA__"
+    );
+    if (nextDataScript) {
+      try {
+        const nextData = JSON.parse(nextDataScript.textContent);
+        // Walk the props tree looking for article body content
+        const body = findDeepValue(nextData, "body") ||
+          findDeepValue(nextData, "articleBody") ||
+          findDeepValue(nextData, "content");
+        if (typeof body === "string" && body.length > 500) {
+          console.log(`__NEXT_DATA__ extraction found body: ${body.length} chars`);
+          return {
+            title: findDeepValue(nextData, "headline") || findDeepValue(nextData, "title") || null,
+            content: `<p>${body.replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>`,
+            textContent: body,
+            byline: null,
+            siteName: null,
+          };
+        }
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error(`JSON-LD extraction failed: ${err.message}`);
+  }
+  return null;
+}
+
+// Walk an object tree to find a string value by key name
+function findDeepValue(obj, key, depth = 0) {
+  if (depth > 10 || !obj || typeof obj !== "object") return null;
+  if (obj[key] && typeof obj[key] === "string" && obj[key].length > 200) return obj[key];
+  for (const k of Object.keys(obj)) {
+    const result = findDeepValue(obj[k], key, depth + 1);
+    if (result) return result;
+  }
+  return null;
+}
+
 // --- Archive fallback via plain HTTP (works through proxies) ---
 const ARCHIVE_SOURCES = [
   (url) => `https://archive.ph/newest/${url}`,
   (url) => `https://archive.today/newest/${url}`,
+  (url) => `https://archive.is/newest/${url}`,
+  (url) => `https://archive.vn/newest/${url}`,
 ];
 
 // Detect challenge/CAPTCHA pages that aren't real article content
@@ -505,8 +593,9 @@ app.post("/api/archive", async (req, res) => {
   try {
     let article = null;
 
-    // Step 1: Plain HTTP fetch (fast, works for most sites)
+    // Step 1: Plain HTTP fetch + JSON-LD extraction (fast, works for most sites)
     console.log(`Step 1 — plain fetch: ${url}`);
+    let rawHtml = null;
     const response = await fetch(url, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -520,34 +609,87 @@ app.post("/api/archive", async (req, res) => {
     });
 
     if (response.ok) {
-      const html = await response.text();
-      const dom = new JSDOM(html, { url });
+      rawHtml = await response.text();
+      const dom = new JSDOM(rawHtml, { url });
       const reader = new Readability(dom.window.document);
       article = reader.parse();
     }
 
-    // Step 1b: Retry with Googlebot UA (many sites serve full content for SEO)
+    // Step 1b: Extract from JSON-LD / structured data in the same HTML
+    // Many paywalled sites embed full articleBody in JSON-LD for SEO
+    if (rawHtml && (!article || looksPaywalled(article.textContent))) {
+      console.log("Step 1b — JSON-LD / structured data extraction");
+      const ldArticle = extractArticleFromJsonLd(rawHtml, url);
+      if (ldArticle && ldArticle.textContent) {
+        article = pickBestArticle(article, ldArticle);
+      }
+    }
+
+    // Step 1c: Retry with crawler User-Agents (parallel)
+    // Many sites serve full content to search/social crawlers for SEO
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 1b — Googlebot UA fetch");
-      try {
-        const gbResp = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-            Accept: "text/html",
-          },
-          redirect: "follow",
-        });
-        if (gbResp.ok) {
-          const gbHtml = await gbResp.text();
-          const gbDom = new JSDOM(gbHtml, { url });
-          const gbArticle = new Readability(gbDom.window.document).parse();
-          if (gbArticle && gbArticle.textContent) {
-            article = pickBestArticle(article, gbArticle);
+      console.log("Step 1c — crawler UA fetches (parallel)");
+      const crawlerUAs = [
+        {
+          label: "Googlebot",
+          ua: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+          referer: "https://www.google.com/",
+        },
+        {
+          label: "Bingbot",
+          ua: "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+          referer: "https://www.bing.com/",
+        },
+        {
+          label: "Facebook",
+          ua: "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+          referer: "https://www.facebook.com/",
+        },
+        {
+          label: "Twitter",
+          ua: "Twitterbot/1.0",
+          referer: "https://t.co/",
+        },
+      ];
+
+      const crawlerResults = await Promise.all(
+        crawlerUAs.map(async ({ label, ua, referer }) => {
+          try {
+            const resp = await fetch(url, {
+              headers: {
+                "User-Agent": ua,
+                Accept: "text/html",
+                Referer: referer,
+              },
+              redirect: "follow",
+            });
+            if (!resp.ok) return null;
+            const html = await resp.text();
+            // Try JSON-LD first (might have full article hidden in structured data)
+            const ldResult = extractArticleFromJsonLd(html, url);
+            if (ldResult && ldResult.textContent && !looksPaywalled(ldResult.textContent)) {
+              console.log(`${label} JSON-LD returned article: ${ldResult.textContent.length} chars`);
+              return ldResult;
+            }
+            // Fall back to Readability
+            const dom = new JSDOM(html, { url });
+            const parsed = new Readability(dom.window.document).parse();
+            if (parsed && parsed.textContent) {
+              console.log(`${label} Readability returned: ${parsed.textContent.length} chars`);
+              return parsed;
+            }
+            return null;
+          } catch (err) {
+            console.error(`${label} fetch failed: ${err.message}`);
+            return null;
           }
+        })
+      );
+
+      for (const candidate of crawlerResults) {
+        if (candidate && candidate.textContent) {
+          article = pickBestArticle(article, candidate);
         }
-      } catch (err) {
-        console.error("Googlebot fetch failed:", err.message);
       }
     }
 
