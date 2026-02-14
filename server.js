@@ -143,6 +143,25 @@ const ARCHIVE_SOURCES = [
   (url) => `https://archive.today/newest/${url}`,
 ];
 
+// Detect challenge/CAPTCHA pages that aren't real article content
+const CAPTCHA_SIGNALS = [
+  "complete the security check",
+  "please complete the captcha",
+  "why do i have to complete a captcha",
+  "one more step",
+  "checking your browser",
+  "verify you are human",
+  "just a moment",
+  "attention required",
+  "enable javascript and cookies",
+];
+
+function looksLikeCaptcha(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return CAPTCHA_SIGNALS.some((s) => lower.includes(s));
+}
+
 // Helper: parse readable article from HTML string
 function parseArticleFromHtml(html, pageUrl) {
   const dom = new JSDOM(html, { url: pageUrl });
@@ -170,10 +189,14 @@ async function tryFetchArchiveUrl(fetchUrl, label) {
     const locationHeader = resp.headers.get("location") || null;
     console.log(`${label} responded: ${resp.status} → ${resp.url}${locationHeader ? ` (Location: ${locationHeader})` : ""}`);
 
-    // Always try to parse the body — archive.ph serves full content even on 429
+    // Always try to parse the body — archive.ph sometimes serves content even on 429
     const html = await resp.text();
     const article = parseArticleFromHtml(html, resp.url);
     if (article && article.textContent && article.textContent.length > 500) {
+      if (looksLikeCaptcha(article.textContent)) {
+        console.log(`${label} returned CAPTCHA/challenge page — skipping`);
+        return { article: null, status: resp.status, locationHeader };
+      }
       console.log(`${label} returned article: ${article.textContent.length} chars`);
       return { article, status: resp.status, locationHeader };
     }
@@ -207,6 +230,71 @@ async function fetchViaArchive(url) {
   }
 
   return null;
+}
+
+// --- Wayback Machine (archive.org) fallback ---
+async function fetchViaWayback(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    // Check if a snapshot exists via the Wayback Availability API
+    const apiUrl = `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`;
+    console.log(`Wayback Machine: checking ${apiUrl}`);
+    const resp = await fetch(apiUrl, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!resp.ok) {
+      console.log(`Wayback API responded: ${resp.status}`);
+      return null;
+    }
+
+    const data = await resp.json();
+    const snapshot = data?.archived_snapshots?.closest;
+    if (!snapshot || !snapshot.available || !snapshot.url) {
+      console.log("Wayback Machine: no snapshot available");
+      return null;
+    }
+
+    // Fetch the snapshot page
+    const snapshotUrl = snapshot.url.replace(/^http:/, "https:");
+    console.log(`Wayback Machine: fetching snapshot ${snapshotUrl}`);
+    const controller2 = new AbortController();
+    const timeout2 = setTimeout(() => controller2.abort(), 20000);
+    const pageResp = await fetch(snapshotUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html",
+      },
+      redirect: "follow",
+      signal: controller2.signal,
+    });
+    clearTimeout(timeout2);
+
+    if (!pageResp.ok) {
+      console.log(`Wayback snapshot responded: ${pageResp.status}`);
+      return null;
+    }
+
+    const html = await pageResp.text();
+    const article = parseArticleFromHtml(html, url);
+    if (article && article.textContent && article.textContent.length > 500) {
+      if (looksLikeCaptcha(article.textContent)) {
+        console.log("Wayback Machine returned CAPTCHA page — skipping");
+        return null;
+      }
+      console.log(`Wayback Machine returned article: ${article.textContent.length} chars`);
+      return article;
+    }
+    console.log(`Wayback Machine returned insufficient content (${article?.textContent?.length || 0} chars)`);
+    return null;
+  } catch (err) {
+    clearTimeout(timeout);
+    console.error(`Wayback Machine failed: ${err.message}`);
+    return null;
+  }
 }
 
 // --- Pro cookie helpers ---
@@ -444,16 +532,22 @@ app.post("/api/archive", async (req, res) => {
       }
     }
 
-    // Step 2: Archive.ph fallback
+    // Step 2: Archive.ph + Wayback Machine in parallel
     if (!article || looksPaywalled(article.textContent)) {
-      console.log("Step 2 — archive.ph fallback");
-      const archived = await fetchViaArchive(url);
-      if (
-        archived &&
-        archived.textContent &&
-        (!article || archived.textContent.length > article.textContent.length)
-      ) {
-        article = archived;
+      console.log("Step 2 — archive.ph + Wayback Machine (parallel)");
+      const [archived, wayback] = await Promise.all([
+        fetchViaArchive(url),
+        fetchViaWayback(url),
+      ]);
+
+      for (const candidate of [archived, wayback]) {
+        if (
+          candidate &&
+          candidate.textContent &&
+          (!article || candidate.textContent.length > article.textContent.length)
+        ) {
+          article = candidate;
+        }
       }
     }
 
