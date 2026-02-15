@@ -274,12 +274,29 @@ header h1 {
   margin-top: 24px;
 }
 
+.tier-strip[hidden] { display: none; }
+
 .tier-card {
-  padding: 14px 16px;
+  padding: 16px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  border-radius: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+.tier-card[hidden] { display: none; }
+
+.tier-card-clickable {
+  cursor: pointer;
+}
+
+.tier-card-clickable:hover {
+  border-color: #ccc;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .tier-card.tier-active {
@@ -287,15 +304,19 @@ header h1 {
   box-shadow: 0 0 0 2px rgba(255, 107, 44, 0.1);
 }
 
+.tier-card.tier-active.tier-card-clickable:hover {
+  border-color: var(--brand);
+}
+
 .tier-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .tier-card-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--dark);
 }
@@ -304,12 +325,47 @@ header h1 {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
-.tier-card-detail {
-  font-size: 11px;
+.tier-card-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px 0;
+}
+
+.tier-card-features li {
+  font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.8;
+  padding-left: 16px;
+  position: relative;
+}
+
+.tier-card-features li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.tier-card.tier-active .tier-card-features li::before {
+  background: var(--brand);
+}
+
+.tier-card-cta {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .tier-card-pro {
@@ -322,16 +378,61 @@ header h1 {
 }
 
 .tier-card-pro .tier-card-price {
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tier-card-pro .tier-card-features li {
   color: #9898A8;
 }
 
-.tier-card-pro .tier-card-detail {
-  color: #9898A8;
+.tier-card-pro .tier-card-features li::before {
+  background: #555;
+}
+
+.tier-card-pro.tier-active .tier-card-features li::before {
+  background: var(--brand);
+}
+
+.tier-card-pro .tier-card-cta {
+  color: var(--brand);
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.tier-card-pro.tier-card-clickable:hover {
+  border-color: var(--brand);
+  box-shadow: 0 2px 12px rgba(255, 107, 44, 0.15);
 }
 
 .tier-card-pro.tier-active {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px rgba(255, 107, 44, 0.2);
+}
+
+/* When visitor card is hidden, make it 2-col */
+.tier-strip:has(.tier-card[hidden]) {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* --- Pro Status Banner --- */
+.pro-status {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, var(--dark) 0%, #2D2D3F 100%);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pro-status[hidden] { display: none; }
+
+.pro-status svg {
+  color: var(--brand);
+  flex-shrink: 0;
 }
 
 /* --- Ghost URL Rows (Pro teaser) --- */
@@ -1355,19 +1456,7 @@ header h1 {
     gap: 8px;
   }
 
-  .tier-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-  }
-
-  .tier-card-header {
-    margin-bottom: 0;
-    gap: 8px;
-  }
-
-  .tier-card-detail {
-    display: none;
+  .tier-strip:has(.tier-card[hidden]) {
+    grid-template-columns: 1fr;
   }
 }

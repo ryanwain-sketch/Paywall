@@ -118,22 +118,44 @@
           <span class="tier-card-name">Visitor</span>
           <span class="tier-card-price">Free</span>
         </div>
-        <p class="tier-card-detail">1 cage per day, no account needed</p>
+        <ul class="tier-card-features">
+          <li>1 cage per day</li>
+          <li>No account needed</li>
+          <li>PDF download</li>
+        </ul>
       </div>
-      <div class="tier-card" id="tier-registered">
+      <button class="tier-card tier-card-clickable" id="tier-registered" type="button">
         <div class="tier-card-header">
           <span class="tier-card-name">Member</span>
           <span class="tier-card-price">Free</span>
         </div>
-        <p class="tier-card-detail">3 cages per day with email sign-in</p>
-      </div>
-      <div class="tier-card tier-card-pro" id="tier-pro">
+        <ul class="tier-card-features">
+          <li>3 cages per day</li>
+          <li>Email sign-in only</li>
+          <li>PDF download</li>
+          <li>Local history</li>
+        </ul>
+        <span class="tier-card-cta">Sign in with email</span>
+      </button>
+      <button class="tier-card tier-card-pro tier-card-clickable" id="tier-pro" type="button">
         <div class="tier-card-header">
           <span class="tier-card-name">Pro</span>
           <span class="tier-card-price">$5/mo</span>
         </div>
-        <p class="tier-card-detail">Unlimited cages + parallel mode</p>
-      </div>
+        <ul class="tier-card-features">
+          <li>Unlimited cages</li>
+          <li>Parallel mode</li>
+          <li>PDF download</li>
+          <li>Priority access</li>
+        </ul>
+        <span class="tier-card-cta">Go Pro</span>
+      </button>
+    </div>
+
+    <!-- Pro status (replaces tier strip for Pro users) -->
+    <div id="pro-status" class="pro-status" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="20" height="20"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <span>Pro member &mdash; unlimited cages, parallel mode</span>
     </div>
 
     <div id="error-msg" class="error-msg" hidden></div>

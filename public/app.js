@@ -55,9 +55,11 @@ const accountProLabel = document.getElementById("account-pro-label");
 const accountLogoutBtn = document.getElementById("account-logout-btn");
 
 // Tier cards
+const tierStrip = document.getElementById("tier-strip");
 const tierFreeCard = document.getElementById("tier-free");
 const tierRegisteredCard = document.getElementById("tier-registered");
 const tierProCard = document.getElementById("tier-pro");
+const proStatus = document.getElementById("pro-status");
 
 // --- State ---
 const STORAGE_KEY = "cage-history";
@@ -155,6 +157,19 @@ accountLogoutBtn.addEventListener("click", () => {
 ghostUpgradeLink.addEventListener("click", (e) => {
   e.preventDefault();
   startCheckout();
+});
+
+// Tier card clicks
+tierRegisteredCard.addEventListener("click", () => {
+  if (!isAuthenticated) {
+    showAuthPrompt();
+  }
+});
+
+tierProCard.addEventListener("click", () => {
+  if (!isPro) {
+    startCheckout();
+  }
 });
 
 pastePdfBtn.addEventListener("click", async () => {
@@ -290,17 +305,30 @@ function renderAuthState() {
     ghostRows.hidden = false;
   }
 
-  // Tier card highlighting
-  tierFreeCard.classList.remove("tier-active");
-  tierRegisteredCard.classList.remove("tier-active");
-  tierProCard.classList.remove("tier-active");
-
+  // Tier strip visibility:
+  // Pro → hide tier strip, show pro status banner
+  // Member → hide Visitor card, show Member (active) + Pro
+  // Visitor → show all three
   if (isPro) {
-    tierProCard.classList.add("tier-active");
-  } else if (isAuthenticated) {
-    tierRegisteredCard.classList.add("tier-active");
+    tierStrip.hidden = true;
+    proStatus.hidden = false;
   } else {
-    tierFreeCard.classList.add("tier-active");
+    tierStrip.hidden = false;
+    proStatus.hidden = true;
+
+    tierFreeCard.classList.remove("tier-active");
+    tierRegisteredCard.classList.remove("tier-active");
+    tierProCard.classList.remove("tier-active");
+
+    if (isAuthenticated) {
+      // Member: hide visitor card, highlight member
+      tierFreeCard.hidden = true;
+      tierRegisteredCard.classList.add("tier-active");
+    } else {
+      // Visitor: show all, highlight visitor
+      tierFreeCard.hidden = false;
+      tierFreeCard.classList.add("tier-active");
+    }
   }
 }
 
@@ -403,12 +431,8 @@ async function startCheckout() {
 
 // --- Usage ---
 function renderProStatus() {
-  usageBar.hidden = false;
-  usageBar.classList.add("pro");
-  usageText.textContent = "Pro \u2014 Unlimited cages";
-  usageDots.innerHTML = "";
+  usageBar.hidden = true;
   upgradeBanner.hidden = true;
-  upgradeBanner.style.display = "none";
   archiveBtn.disabled = false;
 }
 
