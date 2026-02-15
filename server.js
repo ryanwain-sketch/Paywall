@@ -163,6 +163,227 @@ function stripBoilerplate(text) {
   return cleaned;
 }
 
+// --- Smart article text cleaning for pasted content ---
+
+const ARTICLE_DATE_PATTERNS = [
+  /\b((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})\b/i,
+  /\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})\b/i,
+  /\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b/i,
+  /\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\b/i,
+];
+
+const PUBLICATION_MAP = {
+  "economist.com": "The Economist",
+  "ft.com": "Financial Times",
+  "nytimes.com": "The New York Times",
+  "wsj.com": "The Wall Street Journal",
+  "washingtonpost.com": "The Washington Post",
+  "theguardian.com": "The Guardian",
+  "telegraph.co.uk": "The Telegraph",
+  "thetimes.co.uk": "The Times",
+  "thetimes.com": "The Times",
+  "bbc.com": "BBC",
+  "bbc.co.uk": "BBC",
+  "bloomberg.com": "Bloomberg",
+  "theatlantic.com": "The Atlantic",
+  "newyorker.com": "The New Yorker",
+  "wired.com": "Wired",
+  "spectator.co.uk": "The Spectator",
+  "newstatesman.com": "New Statesman",
+  "independent.co.uk": "The Independent",
+};
+
+function extractSiteNameFromUrl(url) {
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (PUBLICATION_MAP[host]) return PUBLICATION_MAP[host];
+    const name = host.split(".")[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch {
+    return null;
+  }
+}
+
+function extractTitleFromUrl(url) {
+  if (!url) return null;
+  try {
+    const segments = new URL(url).pathname.split("/").filter((s) => s.length > 0);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      if (seg.length > 5 && !/^\d+$/.test(seg) && seg.includes("-")) {
+        const minor = new Set([
+          "a","an","the","and","but","or","for","nor","on","at","to","by","in","of","up","as","is","it",
+        ]);
+        return seg
+          .replace(/[-_]/g, " ")
+          .split(/\s+/)
+          .map((w, idx) =>
+            idx === 0 || !minor.has(w.toLowerCase())
+              ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+              : w.toLowerCase()
+          )
+          .join(" ");
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanArticleText(raw, sourceUrl) {
+  let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+  // --- 1. Extract metadata before modifying text ---
+  let articleDate = null;
+  for (const re of ARTICLE_DATE_PATTERNS) {
+    const m = text.match(re);
+    if (m) {
+      articleDate = m[1];
+      break;
+    }
+  }
+
+  let byline = null;
+  const bylineMatch = text.match(
+    /\b[Bb]y\s+([A-Z][a-zA-Z'\u2019-]+(?:\s+[A-Z][a-zA-Z'\u2019-]+){0,4})/
+  );
+  if (bylineMatch) byline = bylineMatch[1];
+
+  const siteName = extractSiteNameFromUrl(sourceUrl);
+  const title = extractTitleFromUrl(sourceUrl);
+
+  // --- 2. Strip noise ---
+  // Preserve real paragraph breaks as markers, join soft wraps
+  text = text.replace(/\n\s*\n/g, "\u2029");
+  text = text.replace(/\n/g, " ");
+
+  // Strip noise phrases
+  const noisePatterns = [
+    /\bShare\b/g,
+    /\bSave\b(?=\s|$)/g,
+    /\bCopy link\b/gi,
+    /\bPrint this page\b/gi,
+    /\bListen to this story\b/gi,
+    /\bai[\s-]?narrated\b/gi,
+    /\baudio narration\b/gi,
+    /\|\s*\d+\s*min\s*read/gi,
+    /\b\d+\s*min(?:ute)?s?\s*read\b/gi,
+    /\b(?:photograph|photo|image|picture|illustration)\s*:\s*[^.\u2029]{3,100}/gi,
+    /\b(?:Getty Images?|Reuters|AP Photo|AFP|Alamy|Shutterstock|iStock)\b(?:\s*\/\s*\w+)*/gi,
+    /\bSign up (?:to|for)\s+[^.\u2029]+(?:\.|(?=\u2029))/gi,
+    /\bThis article appeared in[^.\u2029]+\./gi,
+    /\bReuse this content\b/gi,
+    /\bAll rights reserved\b/gi,
+    /\bUnlock the editor'?s digest[^.\u2029]+\./gi,
+    /\bMore from\s+[^.\u2029]+(?:\.|(?=\u2029))/gi,
+    /\bExplore more offers\b/gi,
+  ];
+
+  for (const re of noisePatterns) {
+    text = text.replace(re, " ");
+  }
+
+  // Strip image/illustration descriptions: "illustration of [long description]"
+  text = text.replace(
+    /\b(?:illustration|photograph|picture|photo|image) of\b[^.\u2029]{10,500}/gi,
+    " "
+  );
+
+  // Remove extracted date and byline from body
+  if (articleDate) text = text.replace(articleDate, " ");
+  if (byline) {
+    const escaped = byline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp("\\b[Bb]y\\s+" + escaped), " ");
+  }
+
+  // Restore paragraph markers
+  text = text.replace(/\u2029/g, "\n\n");
+
+  // --- 3. Clean up whitespace and format ---
+  text = text
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n /g, "\n")
+    .replace(/ \n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  text = smartParagraphFormat(text);
+
+  const excerpt = text.split("\n\n")[0]?.substring(0, 300) || "";
+
+  return { title, byline, siteName, articleDate, textContent: text, excerpt };
+}
+
+function smartParagraphFormat(text) {
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 0);
+
+  if (paragraphs.length === 0) return text;
+
+  // If we already have multiple reasonably-sized paragraphs, keep them
+  if (paragraphs.length > 3) {
+    const avgLen =
+      paragraphs.reduce((s, p) => s + p.length, 0) / paragraphs.length;
+    if (avgLen < 1200) return paragraphs.join("\n\n");
+  }
+
+  // Otherwise, split long blocks on sentence boundaries
+  const result = [];
+  for (const para of paragraphs) {
+    if (para.length < 800) {
+      result.push(para);
+      continue;
+    }
+
+    const sentences = splitSentences(para);
+    let current = "";
+    let count = 0;
+
+    for (const s of sentences) {
+      current += (current ? " " : "") + s;
+      count++;
+      if (count >= 4 || (count >= 3 && current.length > 500)) {
+        result.push(current);
+        current = "";
+        count = 0;
+      }
+    }
+    if (current) result.push(current);
+  }
+
+  return result.join("\n\n");
+}
+
+function splitSentences(text) {
+  const sentences = [];
+  const abbrevs =
+    /(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Lt|Gen|Gov|vs|etc|Inc|Ltd|Corp|Vol|No|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s*$/i;
+
+  let current = "";
+  const tokens = text.split(/(\.\s+|\?\s+|!\s+)/);
+
+  for (let i = 0; i < tokens.length; i++) {
+    current += tokens[i];
+    if (/^[.!?]\s+$/.test(tokens[i])) {
+      if (
+        !abbrevs.test(current) &&
+        i + 1 < tokens.length &&
+        /^[A-Z"\u201c]/.test(tokens[i + 1])
+      ) {
+        sentences.push(current.trim());
+        current = "";
+      }
+    }
+  }
+  if (current.trim()) sentences.push(current.trim());
+
+  return sentences;
+}
+
 // --- JSON-LD / structured data extraction ---
 // Many news sites embed full article text in JSON-LD even on paywalled pages
 function extractArticleFromJsonLd(html, pageUrl) {
@@ -751,9 +972,9 @@ app.post("/api/archive", async (req, res) => {
     if (!article) {
       return res.status(422).json({
         error:
-          "Could not extract article content. The site may require a login or block automated access.",
+          "We couldn't get through to this article automatically.",
         fallbackUrl: `https://archive.ph/newest/${url}`,
-        fallbackLabel: "Try archive.ph",
+        fallbackLabel: "backup",
       });
     }
 
@@ -768,9 +989,9 @@ app.post("/api/archive", async (req, res) => {
       console.log(`Final article looks paywalled or is a CAPTCHA page — rejecting (raw: ${article.textContent.length}, cleaned: ${cleanedText.length} chars)`);
       return res.status(422).json({
         error:
-          "Could not bypass the paywall. The article content is behind a login or subscription wall.",
+          "This article is behind a tough paywall, but we have a backup option.",
         fallbackUrl: `https://archive.ph/newest/${url}`,
-        fallbackLabel: "Try archive.ph",
+        fallbackLabel: "backup",
       });
     }
 
@@ -789,9 +1010,24 @@ app.post("/api/archive", async (req, res) => {
   }
 });
 
+// Clean pasted text: extract metadata, strip noise, format paragraphs
+app.post("/api/clean-text", (req, res) => {
+  const { text, sourceUrl } = req.body;
+  if (!text || text.trim().length < 20) {
+    return res.status(400).json({ error: "Text is too short to process" });
+  }
+  try {
+    const result = cleanArticleText(text, sourceUrl);
+    res.json(result);
+  } catch (err) {
+    console.error("Text cleaning error:", err.message);
+    res.status(500).json({ error: "Failed to clean text" });
+  }
+});
+
 // PDF: generate a PDF from the extracted article text
 app.post("/api/pdf", async (req, res) => {
-  const { title, byline, siteName, textContent, sourceUrl } = req.body;
+  const { title, byline, siteName, textContent, sourceUrl, articleDate } = req.body;
   if (!textContent) {
     return res.status(400).json({ error: "Article content is required" });
   }
@@ -835,16 +1071,17 @@ app.post("/api/pdf", async (req, res) => {
 
     doc.moveDown(0.3);
 
-    // Byline & source
+    // Byline, publication, date
     const metaParts = [];
     if (byline) metaParts.push(byline);
     if (siteName) metaParts.push(siteName);
+    if (articleDate) metaParts.push(articleDate);
     if (metaParts.length > 0) {
       doc
         .font("Helvetica")
         .fontSize(11)
         .fillColor("#666666")
-        .text(metaParts.join(" — "));
+        .text(metaParts.join(" \u2014 "));
     }
     if (sourceUrl) {
       doc

@@ -49,19 +49,25 @@
     <!-- Fallback: paste mode for hard-paywalled sites -->
     <div id="paste-fallback" class="paste-fallback" hidden>
       <div class="paste-fallback-header">
+        <!-- Key/unlock icon -->
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="paste-icon">
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
         </svg>
         <div>
-          <strong>This site has a hard paywall</strong>
-          <p>Open the article on archive.ph, copy the text, and paste it below. We'll make your PDF.</p>
+          <strong>No problem — we have another way</strong>
+          <p>We can access this article through our backup reader. Click below to open it, select all the text (<kbd>Ctrl+A</kbd>), copy it (<kbd>Ctrl+C</kbd>), and paste it here. We'll clean it up and create your PDF.</p>
         </div>
       </div>
-      <a id="paste-archive-link" href="#" target="_blank" rel="noopener noreferrer" class="paste-archive-btn">
-        Open on archive.ph &#x2197;
+      <a id="paste-archive-link" href="#" target="_blank" rel="noopener noreferrer" class="paste-backup-btn">
+        <!-- External link icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="paste-backup-icon">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+        Open in backup reader
       </a>
-      <textarea id="paste-textarea" class="paste-textarea" rows="8" placeholder="Paste the article text here..."></textarea>
+      <textarea id="paste-textarea" class="paste-textarea" rows="8" placeholder="Paste the full article text here..."></textarea>
       <div id="paste-actions" class="paste-actions" hidden>
         <button id="paste-pdf-btn" class="pdf-btn" type="button">
           <svg class="pdf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -72,7 +78,7 @@
           </svg>
           <span class="pdf-btn-text">
             <strong>Download PDF</strong>
-            <small>From your pasted text</small>
+            <small>We'll format and clean it up for you</small>
           </span>
         </button>
       </div>

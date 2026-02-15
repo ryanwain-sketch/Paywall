@@ -47,18 +47,57 @@ pasteTextarea.addEventListener("input", () => {
   pasteActions.hidden = pasteTextarea.value.trim().length < 50;
 });
 
-pastePdfBtn.addEventListener("click", () => {
+pastePdfBtn.addEventListener("click", async () => {
   const raw = pasteTextarea.value.trim();
   if (!raw) return;
-  const text = formatPastedText(raw);
-  const pastedArticle = {
-    title: null,
-    byline: null,
-    siteName: null,
-    textContent: text,
-    sourceUrl: lastFailedUrl || "",
-  };
-  downloadPdf(pastedArticle, pastePdfBtn);
+
+  const strong = pastePdfBtn.querySelector("strong");
+  pastePdfBtn.disabled = true;
+  if (strong) strong.textContent = "Cleaning up text\u2026";
+
+  try {
+    // Clean the pasted text server-side (extract metadata, strip noise, format paragraphs)
+    const cleanRes = await fetch("/api/clean-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: raw, sourceUrl: lastFailedUrl || "" }),
+    });
+
+    let article;
+    if (cleanRes.ok) {
+      const cleaned = await cleanRes.json();
+      article = {
+        title: cleaned.title,
+        byline: cleaned.byline,
+        siteName: cleaned.siteName,
+        articleDate: cleaned.articleDate,
+        textContent: cleaned.textContent,
+        excerpt: cleaned.excerpt,
+        sourceUrl: lastFailedUrl || "",
+      };
+    } else {
+      // Fallback: basic formatting
+      article = {
+        title: null,
+        byline: null,
+        siteName: null,
+        textContent: formatPastedText(raw),
+        sourceUrl: lastFailedUrl || "",
+      };
+    }
+
+    // Save to history with extracted metadata
+    saveToHistory(article);
+
+    // Reset button state before downloadPdf manages it
+    pastePdfBtn.disabled = false;
+    if (strong) strong.textContent = "Download PDF";
+    downloadPdf(article, pastePdfBtn);
+  } catch (err) {
+    showError(err.message);
+    pastePdfBtn.disabled = false;
+    if (strong) strong.textContent = "Download PDF";
+  }
 });
 upgradeBtn.addEventListener("click", async () => {
   upgradeBtn.disabled = true;
@@ -287,6 +326,7 @@ function saveToHistory(article) {
     title: article.title,
     byline: article.byline,
     siteName: article.siteName,
+    articleDate: article.articleDate || null,
     textContent: article.textContent,
     excerpt: article.excerpt,
     sourceUrl: article.sourceUrl,
@@ -329,7 +369,12 @@ function renderHistory() {
 
     const metaParts = [];
     if (item.siteName) metaParts.push(item.siteName);
-    metaParts.push(formatDate(item.cagedAt));
+    if (item.byline) metaParts.push(item.byline);
+    if (item.articleDate) {
+      metaParts.push(item.articleDate);
+    } else {
+      metaParts.push(formatDate(item.cagedAt));
+    }
 
     card.innerHTML = `
       <div class="history-card-title">${escapeHtml(item.title || "Untitled")}</div>
@@ -365,8 +410,8 @@ function hideError() {
 }
 
 function showPasteFallback(errorText, archiveUrl) {
-  errorMsg.textContent = errorText;
-  errorMsg.hidden = false;
+  // Don't show the red error box — the paste fallback section explains everything
+  errorMsg.hidden = true;
   pasteArchiveLink.href = archiveUrl;
   pasteTextarea.value = "";
   pasteActions.hidden = true;
