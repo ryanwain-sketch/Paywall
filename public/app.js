@@ -326,7 +326,22 @@ function handleAuthParams() {
   }
   if (params.get("pro") === "1") {
     history.replaceState(null, "", "/");
+    showProSuccessModal();
   }
+}
+
+function showProSuccessModal() {
+  const overlay = document.getElementById("pro-success-overlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+
+  const closeBtn = document.getElementById("pro-success-close");
+  closeBtn.addEventListener("click", () => {
+    overlay.hidden = true;
+  });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.hidden = true;
+  });
 }
 
 async function sendMagicLink() {

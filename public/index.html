@@ -4,6 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cage that Page — Capture any article as PDF</title>
+  <meta name="description" content="Capture any article from the web and turn it into a clean, shareable PDF. Works on paywalled and access-restricted sites.">
+  <link rel="canonical" href="https://cagethatpage.com/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Cage that Page — Capture any article as PDF">
+  <meta property="og:description" content="Capture any article from the web and turn it into a clean, shareable PDF. Works on paywalled and access-restricted sites.">
+  <meta property="og:url" content="https://cagethatpage.com/">
+  <meta property="og:site_name" content="Cage that Page">
+  <meta property="og:image" content="https://cagethatpage.com/og-image.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Cage that Page — Capture any article as PDF">
+  <meta name="twitter:description" content="Capture any article from the web and turn it into a clean, shareable PDF.">
+  <meta name="twitter:image" content="https://cagethatpage.com/og-image.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -260,6 +281,46 @@
         <button id="clear-history-btn" class="clear-history-btn" type="button">Clear all</button>
       </div>
       <div id="history-list" class="history-list"></div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="footer-links">
+        <a href="/terms">Terms</a>
+        <span class="footer-dot"></span>
+        <a href="/privacy">Privacy</a>
+        <span class="footer-dot"></span>
+        <a href="mailto:support@cagethatpage.com">Support</a>
+      </div>
+      <p class="footer-copy">Cage that Page</p>
+    </footer>
+  </div>
+
+  <!-- Pro success modal -->
+  <div id="pro-success-overlay" class="pro-success-overlay" hidden>
+    <div class="pro-success-modal">
+      <div class="pro-success-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
+      <h2>Welcome to Pro!</h2>
+      <p>You now have unlimited cages, parallel mode, and priority access.</p>
+      <ul class="pro-success-features">
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="16" height="16"><polyline points="20 6 9 17 4 12"/></svg>
+          Unlimited cages every day
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="16" height="16"><polyline points="20 6 9 17 4 12"/></svg>
+          Cage multiple articles at once
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="16" height="16"><polyline points="20 6 9 17 4 12"/></svg>
+          Priority access to all features
+        </li>
+      </ul>
+      <button id="pro-success-close" class="pro-success-btn" type="button">Start caging</button>
     </div>
   </div>
 
