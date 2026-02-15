@@ -757,9 +757,15 @@ app.post("/api/archive", async (req, res) => {
       });
     }
 
+    // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
+    const cleanedText = stripBoilerplate(
+      htmlToText(article.content) || article.textContent
+    );
+
     // Final safety check — don't generate a PDF full of paywall/CAPTCHA text
-    if (looksPaywalled(article.textContent) || looksLikeCaptcha(article.textContent)) {
-      console.log("Final article still looks paywalled or is a CAPTCHA page — rejecting");
+    // Check both raw and cleaned text; also reject if cleaned text is too short (teaser)
+    if (looksPaywalled(article.textContent) || looksPaywalled(cleanedText) || looksLikeCaptcha(article.textContent)) {
+      console.log(`Final article looks paywalled or is a CAPTCHA page — rejecting (raw: ${article.textContent.length}, cleaned: ${cleanedText.length} chars)`);
       return res.status(422).json({
         error:
           "Could not bypass the paywall. The article content is behind a login or subscription wall.",
@@ -767,11 +773,6 @@ app.post("/api/archive", async (req, res) => {
         fallbackLabel: "Try archive.ph",
       });
     }
-
-    // Derive text from HTML to preserve paragraph breaks, then strip boilerplate
-    const cleanedText = stripBoilerplate(
-      htmlToText(article.content) || article.textContent
-    );
 
     res.json({
       title: article.title,
