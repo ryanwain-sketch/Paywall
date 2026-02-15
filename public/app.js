@@ -1,8 +1,8 @@
 // --- DOM refs ---
 const urlInput = document.getElementById("url-input");
 const archiveBtn = document.getElementById("archive-btn");
-const cageArea = document.getElementById("cage-area");
-const cageStatus = document.getElementById("cage-status");
+const primaryRow = document.getElementById("primary-row");
+const primaryStatus = document.getElementById("primary-status");
 const errorMsg = document.getElementById("error-msg");
 const result = document.getElementById("result");
 const pdfBtn = document.getElementById("pdf-btn");
@@ -71,33 +71,7 @@ let isPro = false;
 let isAuthenticated = false;
 let userEmail = null;
 let lastFailedUrl = null;
-let cagingMsgTimer = null;
 let urlRowId = 0;
-
-// --- Caging messages ---
-const cagingMessages = [
-  "Caging that page\u2026",
-  "Breaking through the paywall\u2026",
-  "Extracting the article\u2026",
-  "Cleaning up the text\u2026",
-  "Almost there\u2026",
-];
-
-function startCagingMessages() {
-  let idx = 0;
-  cageStatus.textContent = cagingMessages[0];
-  cagingMsgTimer = setInterval(() => {
-    idx = Math.min(idx + 1, cagingMessages.length - 1);
-    cageStatus.textContent = cagingMessages[idx];
-  }, 3000);
-}
-
-function stopCagingMessages() {
-  if (cagingMsgTimer) {
-    clearInterval(cagingMsgTimer);
-    cagingMsgTimer = null;
-  }
-}
 
 // --- Events ---
 archiveBtn.addEventListener("click", archive);
@@ -159,10 +133,16 @@ ghostUpgradeLink.addEventListener("click", (e) => {
   startCheckout();
 });
 
+// Auth close button
+document.getElementById("auth-close-btn").addEventListener("click", () => {
+  authPrompt.hidden = true;
+});
+
 // Tier card clicks
 tierRegisteredCard.addEventListener("click", () => {
   if (!isAuthenticated) {
     showAuthPrompt();
+    authPrompt.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 });
 
@@ -412,8 +392,11 @@ function showAuthPrompt(afterCage) {
 
 // --- Checkout ---
 async function startCheckout() {
-  upgradeBtn.disabled = true;
-  upgradeBtn.textContent = "Redirecting\u2026";
+  // Disable upgrade button if visible
+  if (!upgradeBanner.hidden) {
+    upgradeBtn.disabled = true;
+    upgradeBtn.textContent = "Redirecting\u2026";
+  }
   try {
     const res = await fetch("/api/checkout", { method: "POST" });
     const data = await res.json();
@@ -424,8 +407,10 @@ async function startCheckout() {
     }
   } catch (err) {
     showError(err.message);
-    upgradeBtn.disabled = false;
-    upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
+    if (!upgradeBanner.hidden) {
+      upgradeBtn.disabled = false;
+      upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
+    }
   }
 }
 
@@ -505,9 +490,9 @@ async function archive() {
   hideError();
   result.hidden = true;
   archiveBtn.disabled = true;
-
-  cageArea.className = "cage-area caging";
-  startCagingMessages();
+  urlInput.disabled = true;
+  primaryRow.className = "url-row primary-row caging";
+  primaryStatus.innerHTML = '<div class="url-row-spinner"></div><span>Caging\u2026</span>';
 
   try {
     const res = await fetch("/api/archive", {
@@ -529,29 +514,29 @@ async function archive() {
 
     // Needs auth — show sign-in prompt
     if (res.status === 401 && data.requireAuth) {
-      stopCagingMessages();
-      cageArea.className = "cage-area";
-      cageStatus.textContent = "Paste a URL and cage that page";
+      primaryRow.className = "url-row primary-row";
+      primaryStatus.innerHTML = "";
       showAuthPrompt();
       return;
     }
 
     if (res.status === 429) {
-      stopCagingMessages();
-      cageArea.className = "cage-area";
-      cageStatus.textContent = "Paste a URL and cage that page";
+      primaryRow.className = "url-row primary-row";
+      primaryStatus.innerHTML = '<span style="color:var(--error-text)">Daily limit reached</span>';
       if (!isPro) renderUsage(0, FREE_LIMIT);
       return;
     }
 
     if (!res.ok) {
+      primaryRow.className = "url-row primary-row error";
+      primaryStatus.innerHTML = "";
       if (data.fallbackUrl) {
         lastFailedUrl = url;
         showPasteFallback(data.error, data.fallbackUrl);
       } else {
         showError(data.error || "Failed to cage article.");
       }
-      throw new Error(data.error || "Failed to cage article.");
+      return;
     }
 
     currentArticle = { ...data, sourceUrl: url };
@@ -563,9 +548,8 @@ async function archive() {
     articleMeta.textContent = metaParts.join(" \u2014 ");
     articleExcerpt.textContent = data.excerpt || "";
 
-    stopCagingMessages();
-    cageArea.className = "cage-area caged";
-    cageStatus.textContent = "Page caged!";
+    primaryRow.className = "url-row primary-row caged";
+    primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
     result.hidden = false;
 
     saveToHistory(currentArticle);
@@ -575,12 +559,12 @@ async function archive() {
       showAuthPrompt(true);
     }
   } catch (err) {
-    stopCagingMessages();
-    cageArea.className = "cage-area";
-    cageStatus.textContent = "Paste a URL and cage that page";
+    primaryRow.className = "url-row primary-row error";
+    primaryStatus.innerHTML = "";
     if (errorMsg.hidden) showError(err.message);
   } finally {
     archiveBtn.disabled = false;
+    urlInput.disabled = false;
   }
 }
 
