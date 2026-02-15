@@ -1348,6 +1348,31 @@ app.post("/api/pdf", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// --- Startup: sync Pro status from Stripe for known customers ---
+async function syncProCustomers() {
+  if (!stripe) return;
+  const customerIds = db.getStripeCustomerIds();
+  if (customerIds.length === 0) return;
+
+  console.log(`Syncing Pro status for ${customerIds.length} Stripe customer(s)…`);
+  for (const customerId of customerIds) {
+    try {
+      const subs = await stripe.subscriptions.list({
+        customer: customerId,
+        status: "active",
+        limit: 1,
+      });
+      if (subs.data.length > 0) {
+        proCustomers.add(customerId);
+      }
+    } catch (err) {
+      console.warn(`Could not check subscription for ${customerId}:`, err.message);
+    }
+  }
+  console.log(`Pro sync complete: ${proCustomers.size} active Pro user(s)`);
+}
+
+app.listen(PORT, async () => {
   console.log(`Cage that Page running at http://localhost:${PORT}`);
+  await syncProCustomers();
 });

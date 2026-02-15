@@ -2,7 +2,9 @@ const Database = require("better-sqlite3");
 const crypto = require("crypto");
 const path = require("path");
 
-const db = new Database(path.join(__dirname, "cage.db"));
+// Use DB_PATH env var for persistent disk on Render, fall back to app directory
+const dbPath = process.env.DB_PATH || path.join(__dirname, "cage.db");
+const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 
 db.exec(`
@@ -38,6 +40,7 @@ const stmt = {
   createUser: db.prepare("INSERT OR IGNORE INTO users (email) VALUES (?)"),
   linkStripe: db.prepare("UPDATE users SET stripe_customer_id = ? WHERE email = ?"),
   getUserByStripe: db.prepare("SELECT * FROM users WHERE stripe_customer_id = ?"),
+  getStripeCustomerIds: db.prepare("SELECT stripe_customer_id FROM users WHERE stripe_customer_id IS NOT NULL"),
 
   createMagicLink: db.prepare(
     "INSERT INTO magic_links (token, email, expires_at) VALUES (?, ?, ?)"
@@ -126,6 +129,10 @@ function getUserByStripe(customerId) {
   return stmt.getUserByStripe.get(customerId) || null;
 }
 
+function getStripeCustomerIds() {
+  return stmt.getStripeCustomerIds.all().map((r) => r.stripe_customer_id);
+}
+
 // --- Usage ---
 
 function getUsageCount(email) {
@@ -158,6 +165,7 @@ module.exports = {
   getUser,
   linkStripeCustomer,
   getUserByStripe,
+  getStripeCustomerIds,
   getUsageCount,
   incrementUsage,
 };
