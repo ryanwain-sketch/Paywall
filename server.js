@@ -105,10 +105,13 @@ const PAYWALL_SIGNALS = [
   "members-only",
   "log in to read",
   "digital access for organisations",
+  "reuse this content",
+  "this content is only available to",
+  "this article is only available to",
 ];
 
 function looksPaywalled(text) {
-  if (!text || text.length < 500) return true;
+  if (!text || text.length < 1200) return true;
   const lower = text.toLowerCase();
   return PAYWALL_SIGNALS.some((s) => lower.includes(s));
 }
