@@ -1,3 +1,4 @@
+// --- DOM refs ---
 const urlInput = document.getElementById("url-input");
 const archiveBtn = document.getElementById("archive-btn");
 const cageArea = document.getElementById("cage-area");
@@ -27,14 +28,33 @@ const pasteTextarea = document.getElementById("paste-textarea");
 const pasteActions = document.getElementById("paste-actions");
 const pastePdfBtn = document.getElementById("paste-pdf-btn");
 
+const userBar = document.getElementById("user-bar");
+const userEmailEl = document.getElementById("user-email");
+const logoutBtn = document.getElementById("logout-btn");
+const authPrompt = document.getElementById("auth-prompt");
+const authEmail = document.getElementById("auth-email");
+const authSendBtn = document.getElementById("auth-send-btn");
+const authStatusEl = document.getElementById("auth-status");
+
+const urlRowsContainer = document.getElementById("url-rows");
+const addUrlBtn = document.getElementById("add-url-btn");
+const addUrlHint = document.getElementById("add-url-hint");
+const addUrlUpgrade = document.getElementById("add-url-upgrade");
+
+// --- State ---
 const STORAGE_KEY = "cage-history";
 const FREE_LIMIT = 3;
+const MAX_PARALLEL_ROWS = 4;
 
 let currentArticle = null;
 let isPro = false;
+let isAuthenticated = false;
+let userEmail = null;
 let lastFailedUrl = null;
 let cagingMsgTimer = null;
+let urlRowId = 0;
 
+// --- Caging messages ---
 const cagingMessages = [
   "Caging that page\u2026",
   "Breaking through the paywall\u2026",
@@ -67,7 +87,6 @@ urlInput.addEventListener("keydown", (e) => {
 pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
 clearHistoryBtn.addEventListener("click", clearHistory);
 
-// Paste fallback: show PDF button when user types/pastes text
 pasteTextarea.addEventListener("input", () => {
   pasteActions.hidden = pasteTextarea.value.trim().length < 50;
 });
@@ -81,7 +100,6 @@ pastePdfBtn.addEventListener("click", async () => {
   if (strong) strong.textContent = "Cleaning up text\u2026";
 
   try {
-    // Clean the pasted text server-side (extract metadata, strip noise, format paragraphs)
     const cleanRes = await fetch("/api/clean-text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -101,7 +119,6 @@ pastePdfBtn.addEventListener("click", async () => {
         sourceUrl: lastFailedUrl || "",
       };
     } else {
-      // Fallback: basic formatting
       article = {
         title: null,
         byline: null,
@@ -111,10 +128,7 @@ pastePdfBtn.addEventListener("click", async () => {
       };
     }
 
-    // Save to history with extracted metadata
     saveToHistory(article);
-
-    // Reset button state before downloadPdf manages it
     pastePdfBtn.disabled = false;
     if (strong) strong.textContent = "Download PDF";
     downloadPdf(article, pastePdfBtn);
@@ -124,7 +138,152 @@ pastePdfBtn.addEventListener("click", async () => {
     if (strong) strong.textContent = "Download PDF";
   }
 });
-upgradeBtn.addEventListener("click", async () => {
+
+upgradeBtn.addEventListener("click", startCheckout);
+logoutBtn.addEventListener("click", logout);
+
+authSendBtn.addEventListener("click", sendMagicLink);
+authEmail.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendMagicLink();
+});
+
+addUrlBtn.addEventListener("click", () => {
+  if (isPro) {
+    addUrlRow();
+  } else {
+    // Show Pro upsell hint
+    addUrlHint.hidden = !addUrlHint.hidden;
+  }
+});
+
+addUrlUpgrade.addEventListener("click", (e) => {
+  e.preventDefault();
+  startCheckout();
+});
+
+// --- Init ---
+renderHistory();
+init();
+
+async function init() {
+  await fetchAuthState();
+  handleAuthParams();
+}
+
+// --- Auth ---
+async function fetchAuthState() {
+  try {
+    const res = await fetch("/api/usage");
+    const data = await res.json();
+    isAuthenticated = !!data.authenticated;
+    userEmail = data.email || null;
+    isPro = !!data.pro;
+
+    renderAuthState();
+
+    if (isPro) {
+      renderProStatus();
+    } else if (isAuthenticated) {
+      renderUsage(data.remaining, FREE_LIMIT);
+    } else {
+      renderUsage(data.remaining, data.limit);
+    }
+  } catch {
+    // Silently fail
+  }
+}
+
+function renderAuthState() {
+  if (isAuthenticated) {
+    userBar.hidden = false;
+    userEmailEl.textContent = userEmail;
+    authPrompt.hidden = true;
+  } else {
+    userBar.hidden = true;
+  }
+
+  // Show add-url button for authenticated users
+  addUrlBtn.hidden = !isAuthenticated;
+  if (!isPro && isAuthenticated) {
+    addUrlBtn.classList.add("pro-locked");
+  } else {
+    addUrlBtn.classList.remove("pro-locked");
+  }
+}
+
+function handleAuthParams() {
+  const params = new URLSearchParams(window.location.search);
+  const auth = params.get("auth");
+  if (auth === "ok") {
+    history.replaceState(null, "", "/");
+  } else if (auth === "expired") {
+    showError("That sign-in link has expired. Please request a new one.");
+    history.replaceState(null, "", "/");
+  } else if (auth === "invalid") {
+    showError("Invalid sign-in link. Please request a new one.");
+    history.replaceState(null, "", "/");
+  }
+  if (params.get("pro") === "1") {
+    history.replaceState(null, "", "/");
+  }
+}
+
+async function sendMagicLink() {
+  const email = authEmail.value.trim();
+  if (!email) {
+    authEmail.focus();
+    return;
+  }
+
+  authSendBtn.disabled = true;
+  authSendBtn.textContent = "Sending\u2026";
+  authStatusEl.hidden = true;
+
+  try {
+    const res = await fetch("/api/auth/send-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to send link.");
+    }
+
+    authStatusEl.textContent = "Check your email for a sign-in link!";
+    authStatusEl.className = "auth-status success";
+    authStatusEl.hidden = false;
+  } catch (err) {
+    authStatusEl.textContent = err.message;
+    authStatusEl.className = "auth-status error";
+    authStatusEl.hidden = false;
+  } finally {
+    authSendBtn.disabled = false;
+    authSendBtn.textContent = "Send link";
+  }
+}
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch { /* ignore */ }
+  isAuthenticated = false;
+  userEmail = null;
+  isPro = false;
+  renderAuthState();
+  await fetchAuthState();
+}
+
+function showAuthPrompt() {
+  authPrompt.hidden = false;
+  authStatusEl.hidden = true;
+  authEmail.value = "";
+  setTimeout(() => authEmail.focus(), 100);
+}
+
+// --- Checkout ---
+async function startCheckout() {
   upgradeBtn.disabled = true;
   upgradeBtn.textContent = "Redirecting\u2026";
   try {
@@ -140,33 +299,9 @@ upgradeBtn.addEventListener("click", async () => {
     upgradeBtn.disabled = false;
     upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
   }
-});
-
-// --- Init ---
-renderHistory();
-fetchUsage();
-
-// Clean ?pro=1 from URL after Stripe redirect
-if (new URLSearchParams(window.location.search).get("pro") === "1") {
-  history.replaceState(null, "", "/");
 }
 
 // --- Usage ---
-async function fetchUsage() {
-  try {
-    const res = await fetch("/api/usage");
-    const data = await res.json();
-    isPro = !!data.pro;
-    if (isPro) {
-      renderProStatus();
-    } else {
-      renderUsage(data.remaining);
-    }
-  } catch {
-    // Silently fail — usage bar just stays hidden
-  }
-}
-
 function renderProStatus() {
   usageBar.hidden = false;
   usageBar.classList.add("pro");
@@ -177,20 +312,24 @@ function renderProStatus() {
   archiveBtn.disabled = false;
 }
 
-function renderUsage(remaining) {
+function renderUsage(remaining, limit) {
+  const total = limit || FREE_LIMIT;
   usageBar.hidden = false;
 
   if (remaining <= 0) {
-    usageText.textContent = "No free cages left today";
-    showUpgradeBanner(FREE_LIMIT - remaining);
+    if (!isAuthenticated) {
+      usageText.textContent = "Sign in for more free cages";
+    } else {
+      usageText.textContent = "No free cages left today";
+    }
+    showUpgradeBanner(total - remaining);
   } else {
-    usageText.textContent = `${remaining} of ${FREE_LIMIT} free cages left today`;
+    usageText.textContent = `${remaining} of ${total} free cage${total === 1 ? "" : "s"} left today`;
     hideUpgradeBanner();
   }
 
-  // Render dots
   usageDots.innerHTML = "";
-  for (let i = 0; i < FREE_LIMIT; i++) {
+  for (let i = 0; i < total; i++) {
     const dot = document.createElement("span");
     dot.className = "usage-dot" + (i < remaining ? " active" : "");
     usageDots.appendChild(dot);
@@ -211,7 +350,7 @@ function hideUpgradeBanner() {
   upgradeBanner.hidden = true;
 }
 
-// --- Archive ---
+// --- Archive (primary URL input) ---
 async function archive() {
   const url = urlInput.value.trim();
   if (!url) {
@@ -242,17 +381,29 @@ async function archive() {
 
     const data = await res.json();
 
-    // Update usage from response headers (skip for Pro — they're unlimited)
+    // Update usage from response headers (skip for Pro)
     if (!isPro) {
       const remaining = res.headers.get("X-RateLimit-Remaining");
-      if (remaining !== null) renderUsage(parseInt(remaining, 10));
+      if (remaining !== null) {
+        const limit = parseInt(res.headers.get("X-RateLimit-Limit") || FREE_LIMIT, 10);
+        renderUsage(parseInt(remaining, 10), limit);
+      }
+    }
+
+    // Needs auth — show sign-in prompt
+    if (res.status === 401 && data.requireAuth) {
+      stopCagingMessages();
+      cageArea.className = "cage-area";
+      cageStatus.textContent = "Paste a URL and cage that page";
+      showAuthPrompt();
+      return;
     }
 
     if (res.status === 429) {
       stopCagingMessages();
       cageArea.className = "cage-area";
       cageStatus.textContent = "Paste a URL and cage that page";
-      if (!isPro) renderUsage(0);
+      if (!isPro) renderUsage(0, FREE_LIMIT);
       return;
     }
 
@@ -280,16 +431,129 @@ async function archive() {
     cageStatus.textContent = "Page caged!";
     result.hidden = false;
 
-    // Save to history
     saveToHistory(currentArticle);
+
+    // After first successful cage, show auth prompt for unauthenticated users
+    if (!isAuthenticated) {
+      showAuthPrompt();
+    }
   } catch (err) {
     stopCagingMessages();
     cageArea.className = "cage-area";
     cageStatus.textContent = "Paste a URL and cage that page";
-    // Don't overwrite a fallback-link error that was already shown
     if (errorMsg.hidden) showError(err.message);
   } finally {
     archiveBtn.disabled = false;
+  }
+}
+
+// --- Parallel URL rows (Pro feature) ---
+function addUrlRow() {
+  const count = urlRowsContainer.children.length;
+  if (count >= MAX_PARALLEL_ROWS) return;
+
+  const id = ++urlRowId;
+  const row = document.createElement("div");
+  row.className = "url-row";
+  row.dataset.id = id;
+
+  row.innerHTML = `
+    <input type="url" class="url-row-input" placeholder="https://example.com/article..." autocomplete="off" spellcheck="false">
+    <button class="url-row-btn" type="button">Cage</button>
+    <div class="url-row-status"></div>
+    <button class="url-row-delete" type="button" title="Remove">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+    </button>
+  `;
+
+  const input = row.querySelector(".url-row-input");
+  const btn = row.querySelector(".url-row-btn");
+  const deleteBtn = row.querySelector(".url-row-delete");
+
+  btn.addEventListener("click", () => archiveRow(id));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") archiveRow(id);
+  });
+  deleteBtn.addEventListener("click", () => removeUrlRow(id));
+
+  urlRowsContainer.appendChild(row);
+  input.focus();
+  updateAddUrlBtn();
+}
+
+function removeUrlRow(id) {
+  const row = urlRowsContainer.querySelector(`[data-id="${id}"]`);
+  if (row) row.remove();
+  updateAddUrlBtn();
+}
+
+function updateAddUrlBtn() {
+  const count = urlRowsContainer.children.length;
+  addUrlBtn.hidden = !isAuthenticated || count >= MAX_PARALLEL_ROWS;
+}
+
+async function archiveRow(id) {
+  const row = urlRowsContainer.querySelector(`[data-id="${id}"]`);
+  if (!row) return;
+
+  const input = row.querySelector(".url-row-input");
+  const btn = row.querySelector(".url-row-btn");
+  const statusEl = row.querySelector(".url-row-status");
+  const url = input.value.trim();
+
+  if (!url) return;
+
+  try { new URL(url); } catch {
+    statusEl.innerHTML = '<span style="color:var(--error-text)">Invalid URL</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  input.disabled = true;
+  row.className = "url-row caging";
+  statusEl.innerHTML = '<div class="url-row-spinner"></div><span>Caging\u2026</span>';
+
+  try {
+    const res = await fetch("/api/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+
+    const data = await res.json();
+
+    if (res.status === 429) {
+      row.className = "url-row error";
+      statusEl.innerHTML = '<span style="color:var(--error-text)">Rate limited</span>';
+      return;
+    }
+
+    if (!res.ok) {
+      if (data.fallbackUrl) {
+        row.className = "url-row needs-paste";
+        statusEl.innerHTML = `<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><a href="${escapeHtml(data.fallbackUrl)}" target="_blank" rel="noopener">Backup reader</a>`;
+      } else {
+        row.className = "url-row error";
+        statusEl.innerHTML = `<span style="color:var(--error-text)">${escapeHtml(data.error || "Failed")}</span>`;
+      }
+      return;
+    }
+
+    // Success
+    row.className = "url-row caged";
+    const article = { ...data, sourceUrl: url };
+    saveToHistory(article);
+
+    statusEl.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
+    statusEl.querySelector(".url-row-pdf-btn").addEventListener("click", (e) => {
+      downloadPdf(article, e.target);
+    });
+  } catch (err) {
+    row.className = "url-row error";
+    statusEl.innerHTML = `<span style="color:var(--error-text)">Network error</span>`;
+  } finally {
+    btn.disabled = false;
+    input.disabled = false;
   }
 }
 
@@ -299,9 +563,13 @@ async function downloadPdf(article, btn) {
 
   const targetBtn = btn || pdfBtn;
   const strong = targetBtn.querySelector("strong");
-  const origText = strong ? strong.textContent : null;
+  const origText = strong ? strong.textContent : targetBtn.textContent;
   targetBtn.disabled = true;
-  if (strong) strong.textContent = "Generating PDF\u2026";
+  if (strong) {
+    strong.textContent = "Generating PDF\u2026";
+  } else {
+    targetBtn.textContent = "\u2026";
+  }
 
   try {
     const res = await fetch("/api/pdf", {
@@ -331,7 +599,11 @@ async function downloadPdf(article, btn) {
     showError(err.message);
   } finally {
     targetBtn.disabled = false;
-    if (strong && origText) strong.textContent = origText;
+    if (strong) {
+      strong.textContent = origText;
+    } else {
+      targetBtn.textContent = origText;
+    }
   }
 }
 
@@ -346,8 +618,6 @@ function getHistory() {
 
 function saveToHistory(article) {
   const history = getHistory();
-
-  // Don't duplicate the same URL if caged again — move it to the top
   const filtered = history.filter((h) => h.sourceUrl !== article.sourceUrl);
 
   filtered.unshift({
@@ -361,7 +631,6 @@ function saveToHistory(article) {
     cagedAt: new Date().toISOString(),
   });
 
-  // Keep max 50 entries
   if (filtered.length > 50) filtered.length = 50;
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
@@ -379,7 +648,6 @@ function clearHistory() {
   renderHistory();
 }
 
-// --- History: render ---
 function renderHistory() {
   const history = getHistory();
 
@@ -438,7 +706,6 @@ function hideError() {
 }
 
 function showPasteFallback(errorText, archiveUrl) {
-  // Don't show the red error box — the paste fallback section explains everything
   errorMsg.hidden = true;
   pasteArchiveLink.href = archiveUrl;
   pasteTextarea.value = "";
@@ -462,14 +729,9 @@ function formatDate(iso) {
   });
 }
 
-// Format pasted plain text into proper paragraphs for PDF rendering.
-// The PDF endpoint splits on \n\n for paragraphs, so we need to
-// normalize the text: detect real paragraph breaks vs. soft wraps.
 function formatPastedText(raw) {
-  // Normalize line endings
   let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-  // If the text already has double-newline paragraph breaks, use them as-is
   if (/\n\s*\n/.test(text)) {
     return text
       .split(/\n\s*\n/)
@@ -478,10 +740,6 @@ function formatPastedText(raw) {
       .join("\n\n");
   }
 
-  // Single-newline text (common when copying from archive.ph):
-  // Heuristic — a line that ends without sentence-ending punctuation
-  // and the next line starts with a lowercase letter is a soft wrap.
-  // Otherwise, treat it as a paragraph break.
   const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   const paragraphs = [];
   let current = lines[0] || "";

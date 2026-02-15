@@ -28,6 +28,12 @@
       <p class="subtitle">Capture any article. Get a clean PDF. Share it anywhere.</p>
     </header>
 
+    <!-- User bar (shown when signed in) -->
+    <div id="user-bar" class="user-bar" hidden>
+      <span id="user-email"></span>
+      <button id="logout-btn" type="button">Sign out</button>
+    </div>
+
     <div class="input-group">
       <input
         type="url"
@@ -39,12 +45,41 @@
       <button id="archive-btn" type="button">Cage it!</button>
     </div>
 
+    <!-- Additional URL rows container (Pro parallel loading) -->
+    <div id="url-rows" class="url-rows"></div>
+
+    <!-- Add another URL button -->
+    <button id="add-url-btn" class="add-url-btn" type="button" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add another URL
+    </button>
+    <p id="add-url-hint" class="add-url-hint" hidden>Parallel caging is a Pro feature. <a href="#" id="add-url-upgrade">Upgrade to Pro</a></p>
+
     <div id="usage-bar" class="usage-bar" hidden>
       <span id="usage-text"></span>
       <div class="usage-dots" id="usage-dots"></div>
     </div>
 
     <div id="error-msg" class="error-msg" hidden></div>
+
+    <!-- Auth prompt (shown when unauth user needs to sign in after first cage) -->
+    <div id="auth-prompt" class="auth-prompt" hidden>
+      <div class="auth-prompt-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="auth-icon">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <div>
+          <strong>Sign in to keep caging</strong>
+          <p>Enter your email to get a magic sign-in link — no password needed.</p>
+        </div>
+      </div>
+      <div class="auth-email-group">
+        <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email">
+        <button id="auth-send-btn" type="button">Send link</button>
+      </div>
+      <p id="auth-status" class="auth-status" hidden></p>
+    </div>
 
     <!-- Fallback: paste mode for hard-paywalled sites -->
     <div id="paste-fallback" class="paste-fallback" hidden>

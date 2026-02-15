@@ -1,3 +1,6 @@
 node_modules/
 .env
 *.pdf
+cage.db
+cage.db-wal
+cage.db-shm

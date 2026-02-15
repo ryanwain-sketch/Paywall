@@ -4,16 +4,39 @@ const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 const path = require("path");
+const nodemailer = require("nodemailer");
+const db = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FREE_DAILY_LIMIT = 3;
+const UNAUTH_DAILY_LIMIT = 1;
 
 // --- Stripe setup ---
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const SITE_URL = (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString("hex");
+
+// --- Email setup ---
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = process.env.SMTP_PORT || 587;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const EMAIL_FROM = process.env.EMAIL_FROM || "Cage that Page <noreply@cagethatpage.com>";
+
+let mailer = null;
+if (SMTP_HOST) {
+  mailer = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT),
+    secure: Number(SMTP_PORT) === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+  console.log(`Email configured via ${SMTP_HOST}`);
+} else {
+  console.warn("SMTP not configured — magic links will be logged to console");
+}
 
 let stripe;
 if (STRIPE_SECRET_KEY) {
@@ -703,8 +726,24 @@ function parseCookies(req) {
 
 function isProUser(req) {
   const cookies = parseCookies(req);
+
+  // Check new session-based auth first
+  const email = getAuthEmail(req);
+  if (email) {
+    const user = db.getUser(email);
+    if (user && user.stripe_customer_id && proCustomers.has(user.stripe_customer_id)) {
+      return true;
+    }
+  }
+
+  // Fall back to legacy Stripe cookie
   const customerId = verifyCookie(cookies.cage_pro);
   return customerId && proCustomers.has(customerId);
+}
+
+function getAuthEmail(req) {
+  const cookies = parseCookies(req);
+  return db.getSessionUser(cookies.cage_session || null);
 }
 
 // --- Rate limiting (in-memory, per-IP, daily reset) ---
@@ -746,21 +785,116 @@ function setRateLimitHeaders(res, bucket, isPro) {
   }
 }
 
+// --- Auth endpoints ---
+
+app.post("/api/auth/send-link", async (req, res) => {
+  const { email } = req.body;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Valid email required." });
+  }
+
+  const token = db.createMagicLink(email);
+  const link = `${SITE_URL}/api/auth/verify?token=${encodeURIComponent(token)}`;
+
+  if (mailer) {
+    try {
+      await mailer.sendMail({
+        from: EMAIL_FROM,
+        to: email,
+        subject: "Sign in to Cage that Page",
+        text: `Click this link to sign in:\n\n${link}\n\nThis link expires in 15 minutes.\n\nIf you didn't request this, you can ignore this email.`,
+        html: `<p>Click the link below to sign in:</p><p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#FF6B2C;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Sign in to Cage that Page</a></p><p style="color:#888;font-size:13px;">This link expires in 15 minutes. If you didn't request this, you can ignore this email.</p>`,
+      });
+    } catch (err) {
+      console.error("Email send failed:", err.message);
+      return res.status(500).json({ error: "Failed to send email. Please try again." });
+    }
+  } else {
+    console.log(`\n  Magic link for ${email}:\n  ${link}\n`);
+  }
+
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/verify", (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.redirect("/?auth=invalid");
+
+  const email = db.verifyMagicLink(token);
+  if (!email) return res.redirect("/?auth=expired");
+
+  const sessionToken = db.createSession(email);
+  res.setHeader(
+    "Set-Cookie",
+    `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`
+  );
+  res.redirect("/?auth=ok");
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.json({ authenticated: false });
+
+  const pro = isProUser(req);
+  const user = db.getUser(email);
+
+  if (pro) {
+    return res.json({ authenticated: true, email, pro: true, limit: null, used: 0, remaining: null });
+  }
+
+  const used = db.getUsageCount(email);
+  res.json({
+    authenticated: true,
+    email,
+    pro: false,
+    limit: FREE_DAILY_LIMIT,
+    used,
+    remaining: Math.max(0, FREE_DAILY_LIMIT - used),
+  });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  const cookies = parseCookies(req);
+  db.deleteSession(cookies.cage_session || null);
+  res.setHeader(
+    "Set-Cookie",
+    "cage_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+  );
+  res.json({ ok: true });
+});
+
 // Expose remaining cages without consuming one
 app.get("/api/usage", (req, res) => {
+  const email = getAuthEmail(req);
   const pro = isProUser(req);
+
   if (pro) {
-    return res.json({ pro: true, limit: null, used: 0, remaining: null });
+    return res.json({ pro: true, authenticated: !!email, email, limit: null, used: 0, remaining: null });
   }
+
+  // Authenticated free user: email-based limits
+  if (email) {
+    const used = db.getUsageCount(email);
+    return res.json({
+      pro: false,
+      authenticated: true,
+      email,
+      limit: FREE_DAILY_LIMIT,
+      used,
+      remaining: Math.max(0, FREE_DAILY_LIMIT - used),
+    });
+  }
+
+  // Unauthenticated: IP-based, 1 free cage
   const ip = req.ip;
   const bucket = getRateLimitBucket(ip);
   setRateLimitHeaders(res, bucket, false);
   res.json({
     pro: false,
-    limit: FREE_DAILY_LIMIT,
+    authenticated: false,
+    limit: UNAUTH_DAILY_LIMIT,
     used: bucket.count,
-    remaining: Math.max(0, FREE_DAILY_LIMIT - bucket.count),
-    resetAt: bucket.resetAt,
+    remaining: Math.max(0, UNAUTH_DAILY_LIMIT - bucket.count),
   });
 });
 
@@ -771,7 +905,8 @@ app.post("/api/checkout", async (req, res) => {
   }
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const email = getAuthEmail(req);
+    const checkoutParams = {
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{
@@ -788,7 +923,10 @@ app.post("/api/checkout", async (req, res) => {
       }],
       success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${SITE_URL}`,
-    });
+    };
+    // Pre-fill email if the user is authenticated
+    if (email) checkoutParams.customer_email = email;
+    const session = await stripe.checkout.sessions.create(checkoutParams);
 
     res.json({ url: session.url });
   } catch (err) {
@@ -808,6 +946,14 @@ app.get("/success", async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status === "paid" && session.customer) {
       proCustomers.add(session.customer);
+
+      // Link Stripe customer to user account if authenticated
+      const email = getAuthEmail(req) || session.customer_email;
+      if (email) {
+        db.linkStripeCustomer(email, session.customer);
+      }
+
+      // Legacy pro cookie (for backwards compatibility)
       const signed = signCookie(session.customer);
       res.setHeader(
         "Set-Cookie",
@@ -837,21 +983,38 @@ app.post("/api/archive", async (req, res) => {
 
   // Rate limit check — Pro users bypass
   const pro = isProUser(req);
-  const ip = req.ip;
-  const bucket = getRateLimitBucket(ip);
-  setRateLimitHeaders(res, bucket, pro);
+  const email = getAuthEmail(req);
 
   if (!pro) {
-    if (bucket.count >= FREE_DAILY_LIMIT) {
-      return res.status(429).json({
-        error: "You've used all 3 free cages for today.",
-        upgrade: true,
-        remaining: 0,
-        resetAt: bucket.resetAt,
-      });
+    if (email) {
+      // Authenticated free user: email-based limits
+      const used = db.getUsageCount(email);
+      if (used >= FREE_DAILY_LIMIT) {
+        return res.status(429).json({
+          error: `You've used all ${FREE_DAILY_LIMIT} free cages for today.`,
+          upgrade: true,
+          remaining: 0,
+        });
+      }
+      db.incrementUsage(email);
+      const remaining = Math.max(0, FREE_DAILY_LIMIT - used - 1);
+      res.set("X-RateLimit-Limit", String(FREE_DAILY_LIMIT));
+      res.set("X-RateLimit-Remaining", String(remaining));
+    } else {
+      // Unauthenticated: IP-based, 1 free cage then must sign in
+      const ip = req.ip;
+      const bucket = getRateLimitBucket(ip);
+      if (bucket.count >= UNAUTH_DAILY_LIMIT) {
+        return res.status(401).json({
+          error: "Sign in to keep caging.",
+          requireAuth: true,
+          remaining: 0,
+        });
+      }
+      bucket.count++;
+      res.set("X-RateLimit-Limit", String(UNAUTH_DAILY_LIMIT));
+      res.set("X-RateLimit-Remaining", String(Math.max(0, UNAUTH_DAILY_LIMIT - bucket.count)));
     }
-    bucket.count++;
-    res.set("X-RateLimit-Remaining", String(Math.max(0, FREE_DAILY_LIMIT - bucket.count)));
   }
 
   try {
