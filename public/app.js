@@ -21,11 +21,18 @@ const upgradeBanner = document.getElementById("upgrade-banner");
 const upgradeTitle = document.getElementById("upgrade-title");
 const upgradeBtn = document.getElementById("upgrade-btn");
 
+const pasteFallback = document.getElementById("paste-fallback");
+const pasteArchiveLink = document.getElementById("paste-archive-link");
+const pasteTextarea = document.getElementById("paste-textarea");
+const pasteActions = document.getElementById("paste-actions");
+const pastePdfBtn = document.getElementById("paste-pdf-btn");
+
 const STORAGE_KEY = "cage-history";
 const FREE_LIMIT = 3;
 
 let currentArticle = null;
 let isPro = false;
+let lastFailedUrl = null;
 
 // --- Events ---
 archiveBtn.addEventListener("click", archive);
@@ -34,6 +41,24 @@ urlInput.addEventListener("keydown", (e) => {
 });
 pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
 clearHistoryBtn.addEventListener("click", clearHistory);
+
+// Paste fallback: show PDF button when user types/pastes text
+pasteTextarea.addEventListener("input", () => {
+  pasteActions.hidden = pasteTextarea.value.trim().length < 50;
+});
+
+pastePdfBtn.addEventListener("click", () => {
+  const text = pasteTextarea.value.trim();
+  if (!text) return;
+  const pastedArticle = {
+    title: null,
+    byline: null,
+    siteName: null,
+    textContent: text,
+    sourceUrl: lastFailedUrl || "",
+  };
+  downloadPdf(pastedArticle, pastePdfBtn);
+});
 upgradeBtn.addEventListener("click", async () => {
   upgradeBtn.disabled = true;
   upgradeBtn.textContent = "Redirecting\u2026";
@@ -167,7 +192,8 @@ async function archive() {
 
     if (!res.ok) {
       if (data.fallbackUrl) {
-        showError(data.error, data.fallbackUrl, data.fallbackLabel);
+        lastFailedUrl = url;
+        showPasteFallback(data.error, data.fallbackUrl);
       } else {
         showError(data.error || "Failed to cage article.");
       }
@@ -326,24 +352,31 @@ function renderHistory() {
 }
 
 // --- Helpers ---
-function showError(msg, fallbackUrl, fallbackLabel) {
-  if (fallbackUrl) {
-    errorMsg.innerHTML =
-      escapeHtml(msg) +
-      ' <a href="' +
-      escapeHtml(fallbackUrl) +
-      '" target="_blank" rel="noopener noreferrer" style="color:#4fc3f7;text-decoration:underline">' +
-      escapeHtml(fallbackLabel || "Try Wayback Machine") +
-      " \u2197</a>";
-  } else {
-    errorMsg.textContent = msg;
-  }
+function showError(msg) {
+  errorMsg.textContent = msg;
   errorMsg.hidden = false;
 }
 
 function hideError() {
   errorMsg.textContent = "";
   errorMsg.hidden = true;
+  hidePasteFallback();
+}
+
+function showPasteFallback(errorText, archiveUrl) {
+  errorMsg.textContent = errorText;
+  errorMsg.hidden = false;
+  pasteArchiveLink.href = archiveUrl;
+  pasteTextarea.value = "";
+  pasteActions.hidden = true;
+  pasteFallback.hidden = false;
+}
+
+function hidePasteFallback() {
+  pasteFallback.hidden = true;
+  pasteTextarea.value = "";
+  pasteActions.hidden = true;
+  lastFailedUrl = null;
 }
 
 function formatDate(iso) {
