@@ -250,7 +250,7 @@ function cleanArticleText(raw, sourceUrl) {
   }
 
   let byline = null;
-  const bylineMatch = text.match(
+  const bylineMatch = headerArea.match(
     /\b[Bb]y\s+([A-Z][a-zA-Z'\u2019-]+(?:\s+[A-Z][a-zA-Z'\u2019-]+){0,4})/
   );
   if (bylineMatch) byline = bylineMatch[1];
@@ -265,17 +265,32 @@ function cleanArticleText(raw, sourceUrl) {
 
   // Strip noise phrases
   const noisePatterns = [
+    // UI elements
     /\bShare\b/g,
     /\bSave\b(?=\s|$)/g,
     /\bCopy link\b/gi,
     /\bPrint this page\b/gi,
+    /\bSee more\b/gi,
+    /\bFollow\b(?:\s+us)?(?=\s|$)/g,
+    /\bComments?\s*(?:\(\d+\))?(?=\s|$)/g,
+    /\bGift this article\b[^.\u2029]*/gi,
+    /\bAdd us as preferred source\b/gi,
+    // Audio/video
     /\bListen to this story\b/gi,
     /\bai[\s-]?narrated\b/gi,
     /\baudio narration\b/gi,
+    // Reading time & timestamps
     /\|\s*\d+\s*min\s*read/gi,
     /\b\d+\s*min(?:ute)?s?\s*read\b/gi,
+    /\b\d{1,2}:\d{2}\s*(?:am|pm)\s*(?:GMT|BST|EST|PST|UTC|ET|PT|CT|CET|CEST)\b/gi,
+    /\bUpdated\s*:\s*[^.\u2029]{5,60}/gi,
+    /\bPublished\s*:\s*[^.\u2029]{5,60}/gi,
+    // Image credits & captions
     /\b(?:photograph|photo|image|picture|illustration)\s*:\s*[^.\u2029]{3,100}/gi,
+    /\bCredit\s*:\s*[^.\u2029]{3,150}/gi,
     /\b(?:Getty Images?|Reuters|AP Photo|AFP|Alamy|Shutterstock|iStock)\b(?:\s*\/\s*\w+)*/gi,
+    /[-\u2013\u2014]\s*seen here\b[^.\u2013\u2014]*[-\u2013\u2014]/gi,
+    // Newsletter/subscription prompts
     /\bSign up (?:to|for)\s+[^.\u2029]+(?:\.|(?=\u2029))/gi,
     /\bThis article appeared in[^.\u2029]+\./gi,
     /\bReuse this content\b/gi,
@@ -283,6 +298,9 @@ function cleanArticleText(raw, sourceUrl) {
     /\bUnlock the editor'?s digest[^.\u2029]+\./gi,
     /\bMore from\s+[^.\u2029]+(?:\.|(?=\u2029))/gi,
     /\bExplore more offers\b/gi,
+    /\bRelated\s+(?:articles?|stories|topics?)\b/gi,
+    // Author role lines (e.g. "Sunday Political Editor")
+    /\b(?:Chief|Senior|Deputy|Assistant|Associate)?\s*(?:Political|Foreign|Business|Science|Health|Technology|Economics?|Environment)\s+(?:Editor|Reporter|Correspondent|Writer|Columnist)\b/gi,
   ];
 
   for (const re of noisePatterns) {
