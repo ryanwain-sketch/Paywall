@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const { Readability } = require("@mozilla/readability");
 const { JSDOM } = require("jsdom");
