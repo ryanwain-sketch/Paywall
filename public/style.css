@@ -652,6 +652,13 @@ header h1 {
 .url-row.needs-paste .url-row-input { border-color: #F59E0B; }
 .url-row.error .url-row-input { border-color: var(--error-border); }
 
+/* Greyed-out metadata shown in input after cage (overwritable on focus) */
+.url-row-input.caged-meta {
+  color: var(--muted);
+  font-style: italic;
+  text-overflow: ellipsis;
+}
+
 .url-row-delete {
   width: 32px;
   height: 32px;

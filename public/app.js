@@ -78,7 +78,7 @@ archiveBtn.addEventListener("click", archive);
 urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") archive();
 });
-pdfBtn.addEventListener("click", () => downloadPdf(currentArticle));
+pdfBtn.addEventListener("click", () => openPdf(currentArticle));
 clearHistoryBtn.addEventListener("click", clearHistory);
 
 pasteTextarea.addEventListener("input", () => {
@@ -191,12 +191,12 @@ pastePdfBtn.addEventListener("click", async () => {
 
     saveToHistory(article);
     pastePdfBtn.disabled = false;
-    if (strong) strong.textContent = "Download PDF";
-    downloadPdf(article, pastePdfBtn);
+    if (strong) strong.textContent = "Open PDF";
+    openPdf(article, pastePdfBtn);
   } catch (err) {
     showError(err.message);
     pastePdfBtn.disabled = false;
-    if (strong) strong.textContent = "Download PDF";
+    if (strong) strong.textContent = "Open PDF";
   }
 });
 
@@ -528,12 +528,33 @@ async function archive() {
     }
 
     if (!res.ok) {
-      primaryRow.className = "url-row primary-row error";
-      primaryStatus.innerHTML = "";
       if (data.fallbackUrl) {
         lastFailedUrl = url;
+        primaryRow.className = "url-row primary-row needs-paste";
+        primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>';
+
+        // Show domain in input so user knows which article hit the paywall
+        try {
+          const host = new URL(url).hostname.replace(/^www\./, "");
+          urlInput.value = host + " — paywalled, see below";
+        } catch {
+          urlInput.value = "Paywalled — see below";
+        }
+        urlInput.classList.add("caged-meta");
+        urlInput.addEventListener("focus", function onFocus() {
+          if (urlInput.classList.contains("caged-meta")) {
+            urlInput.value = "";
+            urlInput.classList.remove("caged-meta");
+            primaryRow.className = "url-row primary-row";
+            primaryStatus.innerHTML = "";
+          }
+          urlInput.removeEventListener("focus", onFocus);
+        }, { once: true });
+
         showPasteFallback(data.error, data.fallbackUrl);
       } else {
+        primaryRow.className = "url-row primary-row error";
+        primaryStatus.innerHTML = "";
         showError(data.error || "Failed to cage article.");
       }
       return;
@@ -549,7 +570,27 @@ async function archive() {
     articleExcerpt.textContent = data.excerpt || "";
 
     primaryRow.className = "url-row primary-row caged";
-    primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
+    primaryStatus.querySelector(".url-row-pdf-btn").addEventListener("click", () => {
+      openPdf(currentArticle);
+    });
+
+    // Show article metadata in the input (greyed, overwritable)
+    const label = data.title || "Untitled";
+    urlInput.value = label;
+    urlInput.classList.add("caged-meta");
+
+    // Clear meta styling when user starts typing a new URL
+    urlInput.addEventListener("focus", function onFocus() {
+      if (urlInput.classList.contains("caged-meta")) {
+        urlInput.value = "";
+        urlInput.classList.remove("caged-meta");
+        primaryRow.className = "url-row primary-row";
+        primaryStatus.innerHTML = "";
+      }
+      urlInput.removeEventListener("focus", onFocus);
+    }, { once: true });
+
     result.hidden = false;
 
     saveToHistory(currentArticle);
@@ -559,7 +600,7 @@ async function archive() {
       showAuthPrompt(true);
     }
 
-    // Scroll result into view so user sees the PDF download button
+    // Scroll result into view so user sees the article preview + PDF
     setTimeout(() => {
       result.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 100);
@@ -658,6 +699,24 @@ async function archiveRow(id) {
       if (data.fallbackUrl) {
         row.className = "url-row needs-paste";
         statusEl.innerHTML = `<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><a href="${escapeHtml(data.fallbackUrl)}" target="_blank" rel="noopener">Backup reader</a>`;
+
+        // Show domain in input so user knows which article is paywalled
+        try {
+          const host = new URL(url).hostname.replace(/^www\./, "");
+          input.value = host + " — paywalled";
+        } catch {
+          input.value = "Paywalled";
+        }
+        input.classList.add("caged-meta");
+        input.addEventListener("focus", function onFocus() {
+          if (input.classList.contains("caged-meta")) {
+            input.value = "";
+            input.classList.remove("caged-meta");
+            row.className = "url-row";
+            statusEl.innerHTML = "";
+          }
+          input.removeEventListener("focus", onFocus);
+        }, { once: true });
       } else {
         row.className = "url-row error";
         statusEl.innerHTML = `<span style="color:var(--error-text)">${escapeHtml(data.error || "Failed")}</span>`;
@@ -672,8 +731,22 @@ async function archiveRow(id) {
 
     statusEl.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
     statusEl.querySelector(".url-row-pdf-btn").addEventListener("click", (e) => {
-      downloadPdf(article, e.target);
+      openPdf(article, e.target);
     });
+
+    // Show article title in input (greyed, overwritable)
+    const label = data.title || "Untitled";
+    input.value = label;
+    input.classList.add("caged-meta");
+    input.addEventListener("focus", function onFocus() {
+      if (input.classList.contains("caged-meta")) {
+        input.value = "";
+        input.classList.remove("caged-meta");
+        row.className = "url-row";
+        statusEl.innerHTML = "";
+      }
+      input.removeEventListener("focus", onFocus);
+    }, { once: true });
 
     // Scroll completed row into view
     setTimeout(() => {
@@ -688,8 +761,8 @@ async function archiveRow(id) {
   }
 }
 
-// --- PDF Download ---
-async function downloadPdf(article, btn) {
+// --- PDF ---
+async function openPdf(article, btn) {
   if (!article) return;
 
   const targetBtn = btn || pdfBtn;
@@ -715,17 +788,10 @@ async function downloadPdf(article, btn) {
     }
 
     const blob = await res.blob();
-    const downloadUrl = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    a.href = downloadUrl;
-    a.download =
-      res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] ||
-      "article.pdf";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(downloadUrl);
+    // Open PDF in a new tab so the user stays on the page
+    window.open(blobUrl, "_blank");
   } catch (err) {
     showError(err.message);
   } finally {
@@ -814,7 +880,7 @@ function renderHistory() {
     `;
 
     const dlBtn = card.querySelector(".history-download-btn");
-    dlBtn.addEventListener("click", () => downloadPdf(item, dlBtn));
+    dlBtn.addEventListener("click", () => openPdf(item, dlBtn));
 
     card.querySelector(".history-delete-btn").addEventListener("click", () => {
       deleteFromHistory(item.sourceUrl);
