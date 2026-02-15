@@ -775,6 +775,9 @@ async function openPdf(article, btn) {
     targetBtn.textContent = "\u2026";
   }
 
+  // Open blank tab immediately (within user gesture) so popup blocker allows it
+  const pdfTab = window.open("", "_blank");
+
   try {
     const res = await fetch("/api/pdf", {
       method: "POST",
@@ -790,9 +793,20 @@ async function openPdf(article, btn) {
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
 
-    // Open PDF in a new tab so the user stays on the page
-    window.open(blobUrl, "_blank");
+    if (pdfTab && !pdfTab.closed) {
+      // Load PDF into the already-opened tab
+      pdfTab.location.href = blobUrl;
+    } else {
+      // Popup was blocked — fall back to download
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = (article.title || "article").replace(/[^a-zA-Z0-9 _-]/g, "") + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
   } catch (err) {
+    if (pdfTab && !pdfTab.closed) pdfTab.close();
     showError(err.message);
   } finally {
     targetBtn.disabled = false;
