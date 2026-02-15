@@ -236,9 +236,13 @@ function cleanArticleText(raw, sourceUrl) {
   let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
   // --- 1. Extract metadata before modifying text ---
+  // Only search the header area (~800 chars) for the publication date,
+  // not the full body — articles often mention historical dates that
+  // would incorrectly match (e.g. "November 1st 1990" about Thatcher).
   let articleDate = null;
+  const headerArea = text.substring(0, 800);
   for (const re of ARTICLE_DATE_PATTERNS) {
-    const m = text.match(re);
+    const m = headerArea.match(re);
     if (m) {
       articleDate = m[1];
       break;
