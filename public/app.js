@@ -20,6 +20,7 @@ const usageText = document.getElementById("usage-text");
 const usageDots = document.getElementById("usage-dots");
 const upgradeBanner = document.getElementById("upgrade-banner");
 const upgradeTitle = document.getElementById("upgrade-title");
+const upgradeSubtitle = document.getElementById("upgrade-subtitle");
 const upgradeBtn = document.getElementById("upgrade-btn");
 
 const pasteFallback = document.getElementById("paste-fallback");
@@ -28,18 +29,35 @@ const pasteTextarea = document.getElementById("paste-textarea");
 const pasteActions = document.getElementById("paste-actions");
 const pastePdfBtn = document.getElementById("paste-pdf-btn");
 
-const userBar = document.getElementById("user-bar");
-const userEmailEl = document.getElementById("user-email");
-const logoutBtn = document.getElementById("logout-btn");
 const authPrompt = document.getElementById("auth-prompt");
+const authPromptTitle = document.getElementById("auth-prompt-title");
+const authPromptSubtitle = document.getElementById("auth-prompt-subtitle");
 const authEmail = document.getElementById("auth-email");
 const authSendBtn = document.getElementById("auth-send-btn");
 const authStatusEl = document.getElementById("auth-status");
 
 const urlRowsContainer = document.getElementById("url-rows");
 const addUrlBtn = document.getElementById("add-url-btn");
-const addUrlHint = document.getElementById("add-url-hint");
-const addUrlUpgrade = document.getElementById("add-url-upgrade");
+const ghostRows = document.getElementById("ghost-rows");
+const ghostUpgradeLink = document.getElementById("ghost-upgrade-link");
+
+// Account dropdown
+const accountBtn = document.getElementById("account-btn");
+const accountDropdown = document.getElementById("account-dropdown");
+const accountSignedOut = document.getElementById("account-signed-out");
+const accountSignedIn = document.getElementById("account-signed-in");
+const accountSigninBtn = document.getElementById("account-signin-btn");
+const accountEmailEl = document.getElementById("account-email");
+const accountTierBadge = document.getElementById("account-tier-badge");
+const accountArchiveBtn = document.getElementById("account-archive-btn");
+const accountProBtn = document.getElementById("account-pro-btn");
+const accountProLabel = document.getElementById("account-pro-label");
+const accountLogoutBtn = document.getElementById("account-logout-btn");
+
+// Tier cards
+const tierFreeCard = document.getElementById("tier-free");
+const tierRegisteredCard = document.getElementById("tier-registered");
+const tierProCard = document.getElementById("tier-pro");
 
 // --- State ---
 const STORAGE_KEY = "cage-history";
@@ -91,6 +109,54 @@ pasteTextarea.addEventListener("input", () => {
   pasteActions.hidden = pasteTextarea.value.trim().length < 50;
 });
 
+// Account dropdown toggle
+accountBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const isOpen = !accountDropdown.hidden;
+  accountDropdown.hidden = isOpen;
+  accountBtn.classList.toggle("active", !isOpen);
+});
+
+document.addEventListener("click", (e) => {
+  if (!accountDropdown.hidden && !accountDropdown.contains(e.target) && e.target !== accountBtn) {
+    accountDropdown.hidden = true;
+    accountBtn.classList.remove("active");
+  }
+});
+
+accountSigninBtn.addEventListener("click", () => {
+  accountDropdown.hidden = true;
+  accountBtn.classList.remove("active");
+  showAuthPrompt();
+});
+
+accountArchiveBtn.addEventListener("click", () => {
+  accountDropdown.hidden = true;
+  accountBtn.classList.remove("active");
+  const hist = document.getElementById("history");
+  if (hist && !hist.hidden) {
+    hist.scrollIntoView({ behavior: "smooth" });
+  }
+});
+
+accountProBtn.addEventListener("click", () => {
+  accountDropdown.hidden = true;
+  accountBtn.classList.remove("active");
+  if (!isPro) startCheckout();
+});
+
+accountLogoutBtn.addEventListener("click", () => {
+  accountDropdown.hidden = true;
+  accountBtn.classList.remove("active");
+  logout();
+});
+
+// Ghost row upgrade link
+ghostUpgradeLink.addEventListener("click", (e) => {
+  e.preventDefault();
+  startCheckout();
+});
+
 pastePdfBtn.addEventListener("click", async () => {
   const raw = pasteTextarea.value.trim();
   if (!raw) return;
@@ -140,7 +206,6 @@ pastePdfBtn.addEventListener("click", async () => {
 });
 
 upgradeBtn.addEventListener("click", startCheckout);
-logoutBtn.addEventListener("click", logout);
 
 authSendBtn.addEventListener("click", sendMagicLink);
 authEmail.addEventListener("keydown", (e) => {
@@ -148,17 +213,7 @@ authEmail.addEventListener("keydown", (e) => {
 });
 
 addUrlBtn.addEventListener("click", () => {
-  if (isPro) {
-    addUrlRow();
-  } else {
-    // Show Pro upsell hint
-    addUrlHint.hidden = !addUrlHint.hidden;
-  }
-});
-
-addUrlUpgrade.addEventListener("click", (e) => {
-  e.preventDefault();
-  startCheckout();
+  addUrlRow();
 });
 
 // --- Init ---
@@ -194,20 +249,58 @@ async function fetchAuthState() {
 }
 
 function renderAuthState() {
-  if (isAuthenticated) {
-    userBar.hidden = false;
-    userEmailEl.textContent = userEmail;
-    authPrompt.hidden = true;
-  } else {
-    userBar.hidden = true;
+  // Account icon state
+  accountBtn.classList.remove("authenticated", "pro");
+  if (isPro) {
+    accountBtn.classList.add("pro");
+  } else if (isAuthenticated) {
+    accountBtn.classList.add("authenticated");
   }
 
-  // Show add-url button for authenticated users
-  addUrlBtn.hidden = !isAuthenticated;
-  if (!isPro && isAuthenticated) {
-    addUrlBtn.classList.add("pro-locked");
+  // Dropdown: signed-in vs signed-out sections
+  if (isAuthenticated) {
+    accountSignedOut.hidden = true;
+    accountSignedIn.hidden = false;
+    accountEmailEl.textContent = userEmail;
+    authPrompt.hidden = true;
+
+    // Tier badge
+    if (isPro) {
+      accountTierBadge.textContent = "Pro";
+      accountTierBadge.className = "tier-badge badge-pro";
+      accountProLabel.textContent = "Pro member";
+      accountProBtn.classList.remove("pro-item");
+    } else {
+      accountTierBadge.textContent = "Member";
+      accountTierBadge.className = "tier-badge badge-member";
+      accountProLabel.textContent = "Upgrade to Pro";
+      accountProBtn.classList.add("pro-item");
+    }
   } else {
-    addUrlBtn.classList.remove("pro-locked");
+    accountSignedOut.hidden = false;
+    accountSignedIn.hidden = true;
+  }
+
+  // Parallel URL rows: real for Pro, ghost teaser for everyone else
+  if (isPro) {
+    addUrlBtn.hidden = false;
+    ghostRows.hidden = true;
+  } else {
+    addUrlBtn.hidden = true;
+    ghostRows.hidden = false;
+  }
+
+  // Tier card highlighting
+  tierFreeCard.classList.remove("tier-active");
+  tierRegisteredCard.classList.remove("tier-active");
+  tierProCard.classList.remove("tier-active");
+
+  if (isPro) {
+    tierProCard.classList.add("tier-active");
+  } else if (isAuthenticated) {
+    tierRegisteredCard.classList.add("tier-active");
+  } else {
+    tierFreeCard.classList.add("tier-active");
   }
 }
 
@@ -260,7 +353,7 @@ async function sendMagicLink() {
     authStatusEl.hidden = false;
   } finally {
     authSendBtn.disabled = false;
-    authSendBtn.textContent = "Send link";
+    authSendBtn.textContent = "Send magic link";
   }
 }
 
@@ -275,7 +368,14 @@ async function logout() {
   await fetchAuthState();
 }
 
-function showAuthPrompt() {
+function showAuthPrompt(afterCage) {
+  if (afterCage) {
+    authPromptTitle.textContent = "Nice cage! Sign in for 2 more today";
+    authPromptSubtitle.textContent = "Get 3 free cages a day with just your email — no password needed.";
+  } else {
+    authPromptTitle.textContent = "Sign in to keep caging";
+    authPromptSubtitle.textContent = "Get 3 free cages a day with just your email — no password needed.";
+  }
   authPrompt.hidden = false;
   authStatusEl.hidden = true;
   authEmail.value = "";
@@ -318,13 +418,18 @@ function renderUsage(remaining, limit) {
 
   if (remaining <= 0) {
     if (!isAuthenticated) {
-      usageText.textContent = "Sign in for more free cages";
+      usageText.textContent = "Sign in for 3 free cages a day";
+      showUpgradeBanner(total - remaining, false);
     } else {
       usageText.textContent = "No free cages left today";
+      showUpgradeBanner(total - remaining, true);
     }
-    showUpgradeBanner(total - remaining);
   } else {
-    usageText.textContent = `${remaining} of ${total} free cage${total === 1 ? "" : "s"} left today`;
+    if (!isAuthenticated && total === 1) {
+      usageText.textContent = "1 free cage — sign in for 3/day";
+    } else {
+      usageText.textContent = `${remaining} of ${total} free cage${total === 1 ? "" : "s"} left today`;
+    }
     hideUpgradeBanner();
   }
 
@@ -336,12 +441,20 @@ function renderUsage(remaining, limit) {
   }
 }
 
-function showUpgradeBanner(used) {
-  const count = used ?? FREE_LIMIT;
-  upgradeTitle.textContent =
-    count === 0
-      ? "Go Pro for unlimited cages"
-      : `You've used your ${count} free cage${count === 1 ? "" : "s"} today`;
+function showUpgradeBanner(used, showProUpgrade) {
+  if (showProUpgrade) {
+    // Authenticated free user hit their limit
+    upgradeTitle.textContent = `You've used your ${used} free cage${used === 1 ? "" : "s"} today`;
+    upgradeSubtitle.textContent = "Go Pro for unlimited cages, parallel mode, and more.";
+    upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
+    upgradeBtn.onclick = startCheckout;
+  } else {
+    // Unauth user hit their 1 free cage
+    upgradeTitle.textContent = "Want more? Sign in for free";
+    upgradeSubtitle.textContent = "Get 3 cages a day with just your email, or go unlimited with Pro.";
+    upgradeBtn.innerHTML = "Go Pro &mdash; $5/mo";
+    upgradeBtn.onclick = startCheckout;
+  }
   upgradeBanner.hidden = false;
   archiveBtn.disabled = true;
 }
@@ -435,7 +548,7 @@ async function archive() {
 
     // After first successful cage, show auth prompt for unauthenticated users
     if (!isAuthenticated) {
-      showAuthPrompt();
+      showAuthPrompt(true);
     }
   } catch (err) {
     stopCagingMessages();
@@ -489,7 +602,7 @@ function removeUrlRow(id) {
 
 function updateAddUrlBtn() {
   const count = urlRowsContainer.children.length;
-  addUrlBtn.hidden = !isAuthenticated || count >= MAX_PARALLEL_ROWS;
+  addUrlBtn.hidden = !isPro || count >= MAX_PARALLEL_ROWS;
 }
 
 async function archiveRow(id) {

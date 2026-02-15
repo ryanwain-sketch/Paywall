@@ -39,6 +39,12 @@ header {
   margin-bottom: 36px;
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -66,39 +72,326 @@ header h1 {
   font-weight: 400;
 }
 
-/* --- User Bar --- */
-.user-bar {
+/* --- Account Button & Dropdown --- */
+.account-btn {
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-bottom: 12px;
+  justify-content: center;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--muted);
+  transition: border-color 0.2s, color 0.2s, box-shadow 0.2s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.account-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.account-btn.active {
+  border-color: var(--brand);
+  color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(255, 107, 44, 0.12);
+}
+
+.account-btn.authenticated {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.account-btn.authenticated:hover,
+.account-btn.authenticated.active {
+  border-color: var(--success);
+  color: var(--success);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+}
+
+.account-btn.pro {
+  border-color: var(--brand);
+  color: #fff;
+  background: var(--brand);
+}
+
+.account-btn.pro:hover,
+.account-btn.pro.active {
+  background: var(--brand-hover);
+  box-shadow: 0 0 0 3px rgba(255, 107, 44, 0.2);
+}
+
+.account-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.account-dropdown {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  animation: dropdown-in 0.15s ease-out;
+}
+
+.account-dropdown[hidden] { display: none; }
+
+@keyframes dropdown-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.account-section[hidden] { display: none; }
+
+.account-greeting {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.account-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 18px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.account-action-btn:hover { background: var(--brand-hover); }
+
+.account-user-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-email {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dark);
+}
+
+.tier-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tier-badge.badge-free {
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.tier-badge.badge-member {
+  color: var(--success);
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+}
+
+.tier-badge.badge-pro {
+  color: #fff;
+  background: var(--brand);
+}
+
+.account-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dark);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-align: left;
+}
+
+.account-menu-item:hover {
+  background: var(--bg);
+}
+
+.account-menu-item.pro-item {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.account-menu-item.pro-item:hover {
+  background: rgba(255, 107, 44, 0.06);
+}
+
+.account-menu-item.logout-item {
+  color: var(--muted);
   font-size: 13px;
+}
+
+.account-menu-item.logout-item:hover {
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+.account-menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* --- Tier Strip --- */
+.tier-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.tier-card {
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.tier-card.tier-active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(255, 107, 44, 0.1);
+}
+
+.tier-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.tier-card-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+.tier-card-price {
+  font-size: 11px;
+  font-weight: 600;
   color: var(--muted);
 }
 
-.user-bar[hidden] { display: none; }
-
-#user-email {
-  font-weight: 500;
+.tier-card-detail {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
-#logout-btn {
+.tier-card-pro {
+  background: var(--dark);
+  border-color: var(--dark);
+}
+
+.tier-card-pro .tier-card-name {
+  color: var(--brand);
+}
+
+.tier-card-pro .tier-card-price {
+  color: #9898A8;
+}
+
+.tier-card-pro .tier-card-detail {
+  color: #9898A8;
+}
+
+.tier-card-pro.tier-active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(255, 107, 44, 0.2);
+}
+
+/* --- Ghost URL Rows (Pro teaser) --- */
+.ghost-rows {
+  margin-top: 10px;
+}
+
+.ghost-rows[hidden] { display: none; }
+
+.ghost-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ghost-input {
+  flex: 1;
+  height: 44px;
+  background: var(--card);
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+}
+
+.ghost-btn {
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
   font-family: inherit;
+  color: #fff;
+  background: #ccc;
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.ghost-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
   font-size: 12px;
   color: var(--muted);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  justify-content: center;
 }
 
-#logout-btn:hover {
-  color: var(--dark);
-  border-color: #ccc;
+.ghost-row-label svg {
+  color: var(--brand);
+  flex-shrink: 0;
 }
+
+.ghost-row-label a {
+  color: var(--brand);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ghost-row-label a:hover { text-decoration: underline; }
 
 /* --- URL Input Group --- */
 .input-group {
@@ -214,33 +507,7 @@ header h1 {
   background: rgba(255, 107, 44, 0.04);
 }
 
-.add-url-btn.pro-locked {
-  color: var(--muted);
-  border-color: var(--border);
-  cursor: pointer;
-}
-
-.add-url-btn.pro-locked:hover {
-  border-color: #ccc;
-  background: transparent;
-}
-
-.add-url-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.add-url-hint[hidden] { display: none; }
-
-.add-url-hint a {
-  color: var(--brand);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.add-url-hint a:hover { text-decoration: underline; }
+/* add-url-hint removed — replaced by ghost rows */
 
 .url-rows {
   display: flex;
@@ -1081,5 +1348,26 @@ header h1 {
   .url-row-input {
     width: 100%;
     flex: 1 1 100%;
+  }
+
+  .tier-strip {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .tier-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+  }
+
+  .tier-card-header {
+    margin-bottom: 0;
+    gap: 8px;
+  }
+
+  .tier-card-detail {
+    display: none;
   }
 }
