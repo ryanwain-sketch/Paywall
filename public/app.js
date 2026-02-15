@@ -558,6 +558,11 @@ async function archive() {
     if (!isAuthenticated) {
       showAuthPrompt(true);
     }
+
+    // Scroll result into view so user sees the PDF download button
+    setTimeout(() => {
+      result.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
   } catch (err) {
     primaryRow.className = "url-row primary-row error";
     primaryStatus.innerHTML = "";
@@ -669,6 +674,11 @@ async function archiveRow(id) {
     statusEl.querySelector(".url-row-pdf-btn").addEventListener("click", (e) => {
       downloadPdf(article, e.target);
     });
+
+    // Scroll completed row into view
+    setTimeout(() => {
+      row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
   } catch (err) {
     row.className = "url-row error";
     statusEl.innerHTML = `<span style="color:var(--error-text)">Network error</span>`;
@@ -832,6 +842,11 @@ function showPasteFallback(errorText, archiveUrl) {
   pasteTextarea.value = "";
   pasteActions.hidden = true;
   pasteFallback.hidden = false;
+
+  // Scroll paste fallback into view so user sees the next step
+  setTimeout(() => {
+    pasteFallback.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, 100);
 }
 
 function hidePasteFallback() {

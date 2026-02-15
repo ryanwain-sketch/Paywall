@@ -906,6 +906,7 @@ header h1 {
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  animation: resultAppear 0.5s ease-out;
 }
 
 .paste-fallback[hidden] {
@@ -1019,6 +1020,18 @@ header h1 {
 /* --- Result --- */
 .result {
   margin-top: 20px;
+  animation: resultAppear 0.5s ease-out;
+}
+
+@keyframes resultAppear {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .article-preview {
@@ -1068,6 +1081,12 @@ header h1 {
   cursor: pointer;
   transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
   box-shadow: 0 4px 16px rgba(255, 107, 44, 0.3);
+  animation: pdfPulse 1.5s ease-in-out 0.4s 2;
+}
+
+@keyframes pdfPulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(255, 107, 44, 0.3); }
+  50% { box-shadow: 0 4px 24px rgba(255, 107, 44, 0.55); }
 }
 
 .pdf-btn:hover {
