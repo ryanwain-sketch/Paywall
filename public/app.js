@@ -33,6 +33,31 @@ const FREE_LIMIT = 3;
 let currentArticle = null;
 let isPro = false;
 let lastFailedUrl = null;
+let cagingMsgTimer = null;
+
+const cagingMessages = [
+  "Caging that page\u2026",
+  "Breaking through the paywall\u2026",
+  "Extracting the article\u2026",
+  "Cleaning up the text\u2026",
+  "Almost there\u2026",
+];
+
+function startCagingMessages() {
+  let idx = 0;
+  cageStatus.textContent = cagingMessages[0];
+  cagingMsgTimer = setInterval(() => {
+    idx = Math.min(idx + 1, cagingMessages.length - 1);
+    cageStatus.textContent = cagingMessages[idx];
+  }, 3000);
+}
+
+function stopCagingMessages() {
+  if (cagingMsgTimer) {
+    clearInterval(cagingMsgTimer);
+    cagingMsgTimer = null;
+  }
+}
 
 // --- Events ---
 archiveBtn.addEventListener("click", archive);
@@ -206,7 +231,7 @@ async function archive() {
   archiveBtn.disabled = true;
 
   cageArea.className = "cage-area caging";
-  cageStatus.textContent = "Caging that page\u2026";
+  startCagingMessages();
 
   try {
     const res = await fetch("/api/archive", {
@@ -224,6 +249,7 @@ async function archive() {
     }
 
     if (res.status === 429) {
+      stopCagingMessages();
       cageArea.className = "cage-area";
       cageStatus.textContent = "Paste a URL and cage that page";
       if (!isPro) renderUsage(0);
@@ -249,6 +275,7 @@ async function archive() {
     articleMeta.textContent = metaParts.join(" \u2014 ");
     articleExcerpt.textContent = data.excerpt || "";
 
+    stopCagingMessages();
     cageArea.className = "cage-area caged";
     cageStatus.textContent = "Page caged!";
     result.hidden = false;
@@ -256,6 +283,7 @@ async function archive() {
     // Save to history
     saveToHistory(currentArticle);
   } catch (err) {
+    stopCagingMessages();
     cageArea.className = "cage-area";
     cageStatus.textContent = "Paste a URL and cage that page";
     // Don't overwrite a fallback-link error that was already shown
