@@ -48,8 +48,9 @@ pasteTextarea.addEventListener("input", () => {
 });
 
 pastePdfBtn.addEventListener("click", () => {
-  const text = pasteTextarea.value.trim();
-  if (!text) return;
+  const raw = pasteTextarea.value.trim();
+  if (!raw) return;
+  const text = formatPastedText(raw);
   const pastedArticle = {
     title: null,
     byline: null,
@@ -386,6 +387,53 @@ function formatDate(iso) {
     month: "short",
     year: "numeric",
   });
+}
+
+// Format pasted plain text into proper paragraphs for PDF rendering.
+// The PDF endpoint splits on \n\n for paragraphs, so we need to
+// normalize the text: detect real paragraph breaks vs. soft wraps.
+function formatPastedText(raw) {
+  // Normalize line endings
+  let text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // If the text already has double-newline paragraph breaks, use them as-is
+  if (/\n\s*\n/.test(text)) {
+    return text
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/\n/g, " ").replace(/\s+/g, " ").trim())
+      .filter((p) => p.length > 0)
+      .join("\n\n");
+  }
+
+  // Single-newline text (common when copying from archive.ph):
+  // Heuristic — a line that ends without sentence-ending punctuation
+  // and the next line starts with a lowercase letter is a soft wrap.
+  // Otherwise, treat it as a paragraph break.
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const paragraphs = [];
+  let current = lines[0] || "";
+
+  for (let i = 1; i < lines.length; i++) {
+    const prev = current;
+    const line = lines[i];
+    const isSoftWrap =
+      prev.length > 0 &&
+      !/[.!?:;"\u201d]$/.test(prev) &&
+      /^[a-z]/.test(line);
+
+    if (isSoftWrap) {
+      current += " " + line;
+    } else {
+      paragraphs.push(current);
+      current = line;
+    }
+  }
+  if (current) paragraphs.push(current);
+
+  return paragraphs
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 0)
+    .join("\n\n");
 }
 
 function escapeHtml(str) {
