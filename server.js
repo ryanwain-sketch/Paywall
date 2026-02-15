@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const helmet = require("helmet");
 const { Readability } = require("@mozilla/readability");
 const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
@@ -48,6 +49,22 @@ const proCustomers = new Set();
 
 // Trust proxy for correct IP behind reverse proxies
 app.set("trust proxy", 1);
+
+// Security headers
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com"],
+        connectSrc: ["'self'", "https://www.google-analytics.com", "https://*.google-analytics.com"],
+        imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      },
+    },
+  })
+);
 
 // Stripe webhook needs raw body — must be registered BEFORE express.json()
 app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
@@ -1502,6 +1519,36 @@ app.post("/api/pdf", async (req, res) => {
     console.error("PDF error:", err.message);
     res.status(500).json({ error: `Failed to generate PDF: ${err.message}` });
   }
+});
+
+// --- 404 handler (must be after all other routes) ---
+app.use((req, res) => {
+  res.status(404).type("html").send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page Not Found — Cage that Page</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Space Grotesk', -apple-system, sans-serif; background: #FAFAF7; color: #1C1C28; min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px 20px; }
+    .wrap { max-width: 440px; }
+    h1 { font-size: 72px; font-weight: 700; color: #FF6B2C; line-height: 1; margin-bottom: 12px; }
+    p { font-size: 16px; color: #666; margin-bottom: 24px; line-height: 1.5; }
+    a { display: inline-block; padding: 12px 28px; background: #FF6B2C; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; }
+    a:hover { background: #e85d1f; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>404</h1>
+    <p>This page escaped the cage. Let's get you back.</p>
+    <a href="/">Back to Cage that Page</a>
+  </div>
+</body>
+</html>`);
 });
 
 // --- Startup: sync Pro status from Stripe for known customers ---
