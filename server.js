@@ -4,7 +4,7 @@ const { JSDOM } = require("jsdom");
 const PDFDocument = require("pdfkit");
 const crypto = require("crypto");
 const path = require("path");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const db = require("./db");
 
 const app = express();
@@ -18,25 +18,22 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const SITE_URL = (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString("hex");
 
-// --- Email setup ---
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = process.env.SMTP_PORT || 587;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || "Cage that Page <noreply@cagethatpage.com>";
+// --- Email setup (Resend) ---
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || "Cage that Page <onboarding@resend.dev>";
 
-let mailer = null;
-if (SMTP_HOST) {
-  mailer = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: Number(SMTP_PORT) === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  });
-  console.log(`Email configured via ${SMTP_HOST}`);
+let resend = null;
+if (RESEND_API_KEY) {
+  resend = new Resend(RESEND_API_KEY);
+  console.log("Email configured via Resend");
 } else {
-  console.warn("SMTP not configured — magic links will be logged to console");
+  console.warn("RESEND_API_KEY not set — magic links will be logged to console");
 }
+
+// --- Rate limit for magic link sends (per-email, in-memory) ---
+const sendLinkLimits = new Map();
+const SEND_LINK_MAX = 5;       // max sends per email per window
+const SEND_LINK_WINDOW = 15 * 60 * 1000; // 15 minutes
 
 let stripe;
 if (STRIPE_SECRET_KEY) {
@@ -793,24 +790,37 @@ app.post("/api/auth/send-link", async (req, res) => {
     return res.status(400).json({ error: "Valid email required." });
   }
 
+  // Rate limit: max 5 sends per email per 15 minutes
+  const lower = email.toLowerCase().trim();
+  const now = Date.now();
+  let bucket = sendLinkLimits.get(lower);
+  if (!bucket || now - bucket.start > SEND_LINK_WINDOW) {
+    bucket = { start: now, count: 0 };
+    sendLinkLimits.set(lower, bucket);
+  }
+  if (bucket.count >= SEND_LINK_MAX) {
+    return res.status(429).json({ error: "Too many requests. Please wait a few minutes." });
+  }
+  bucket.count++;
+
   const token = db.createMagicLink(email);
   const link = `${SITE_URL}/api/auth/verify?token=${encodeURIComponent(token)}`;
 
-  if (mailer) {
+  if (resend) {
     try {
-      await mailer.sendMail({
+      await resend.emails.send({
         from: EMAIL_FROM,
-        to: email,
+        to: lower,
         subject: "Sign in to Cage that Page",
         text: `Click this link to sign in:\n\n${link}\n\nThis link expires in 15 minutes.\n\nIf you didn't request this, you can ignore this email.`,
         html: `<p>Click the link below to sign in:</p><p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#FF6B2C;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Sign in to Cage that Page</a></p><p style="color:#888;font-size:13px;">This link expires in 15 minutes. If you didn't request this, you can ignore this email.</p>`,
       });
     } catch (err) {
-      console.error("Email send failed:", err.message);
+      console.error("Resend email failed:", err.message);
       return res.status(500).json({ error: "Failed to send email. Please try again." });
     }
   } else {
-    console.log(`\n  Magic link for ${email}:\n  ${link}\n`);
+    console.log(`\n  Magic link for ${lower}:\n  ${link}\n`);
   }
 
   res.json({ ok: true });
