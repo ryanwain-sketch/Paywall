@@ -749,8 +749,8 @@ app.post("/api/archive", async (req, res) => {
       return res.status(422).json({
         error:
           "Could not extract article content. The site may require a login or block automated access.",
-        fallbackUrl: `https://web.archive.org/web/*/${url}`,
-        fallbackLabel: "Search Wayback Machine",
+        fallbackUrl: `https://archive.ph/newest/${url}`,
+        fallbackLabel: "Try archive.ph",
       });
     }
 
@@ -760,8 +760,8 @@ app.post("/api/archive", async (req, res) => {
       return res.status(422).json({
         error:
           "Could not bypass the paywall. The article content is behind a login or subscription wall.",
-        fallbackUrl: `https://web.archive.org/web/*/${url}`,
-        fallbackLabel: "Try Wayback Machine",
+        fallbackUrl: `https://archive.ph/newest/${url}`,
+        fallbackLabel: "Try archive.ph",
       });
     }
 
