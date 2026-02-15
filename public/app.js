@@ -334,6 +334,7 @@ function showProSuccessModal() {
   const overlay = document.getElementById("pro-success-overlay");
   if (!overlay) return;
   overlay.hidden = false;
+  trackEvent("pro_purchase", { value: 5, currency: "USD" });
 
   const closeBtn = document.getElementById("pro-success-close");
   closeBtn.addEventListener("click", () => {
@@ -413,6 +414,7 @@ async function startCheckout() {
     upgradeBtn.textContent = "Redirecting\u2026";
   }
   try {
+    trackEvent("pro_checkout_start");
     const res = await fetch("/api/checkout", { method: "POST" });
     const data = await res.json();
     if (data.url) {
@@ -576,6 +578,7 @@ async function archive() {
     }
 
     currentArticle = { ...data, sourceUrl: url };
+    trackEvent("cage_article", { site: new URL(url).hostname, method: "auto" });
 
     articleTitle.textContent = data.title || "Untitled";
     const metaParts = [];
@@ -742,6 +745,7 @@ async function archiveRow(id) {
     // Success
     row.className = "url-row caged";
     const article = { ...data, sourceUrl: url };
+    trackEvent("cage_article", { site: new URL(url).hostname, method: "auto" });
     saveToHistory(article);
 
     statusEl.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
@@ -807,6 +811,7 @@ async function openPdf(article, btn) {
 
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
+    trackEvent("pdf_download", { title: article.title || "Untitled" });
 
     if (pdfTab && !pdfTab.closed) {
       // Load PDF into the already-opened tab
@@ -1002,4 +1007,11 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+// --- Analytics ---
+function trackEvent(name, params) {
+  if (typeof gtag === "function") {
+    gtag("event", name, params);
+  }
 }

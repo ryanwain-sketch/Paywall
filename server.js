@@ -1097,6 +1097,7 @@ app.get("/privacy", (req, res) => {
     <ul>
       <li><strong>Stripe</strong> — for payment processing (<a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe Privacy Policy</a>)</li>
       <li><strong>Resend</strong> — for transactional emails (<a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener">Resend Privacy Policy</a>)</li>
+      <li><strong>Google Analytics</strong> — for anonymous usage analytics (<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a>)</li>
       <li><strong>Render</strong> — for hosting</li>
     </ul>
 
@@ -1104,12 +1105,12 @@ app.get("/privacy", (req, res) => {
     <p>Article content is processed in memory and not stored on our servers after PDF generation. Your email and account data are retained while your account is active. You can request deletion by contacting us.</p>
 
     <h2>5. Cookies</h2>
-    <p>We use essential cookies only:</p>
+    <p>We use the following cookies:</p>
     <ul>
       <li><strong>cage_session</strong> — keeps you signed in (HttpOnly, 30 days)</li>
       <li><strong>cage_pro</strong> — verifies Pro subscription status (HttpOnly)</li>
+      <li><strong>_ga / _ga_*</strong> — Google Analytics cookies for anonymous usage data</li>
     </ul>
-    <p>We do not use tracking cookies or advertising cookies.</p>
 
     <h2>6. Your Rights</h2>
     <p>You have the right to:</p>
