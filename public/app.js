@@ -825,8 +825,15 @@ async function openPdf(article, btn) {
     targetBtn.textContent = "\u2026";
   }
 
-  // Open blank tab immediately (within user gesture) so popup blocker allows it
-  const pdfTab = window.open("", "_blank");
+  // Detect native file sharing support (iOS Safari, Android Chrome, etc.)
+  const canShareFiles =
+    navigator.canShare &&
+    navigator.canShare({
+      files: [new File([""], "test.pdf", { type: "application/pdf" })],
+    });
+
+  // Only open a blank tab on desktop (within user gesture to avoid popup blocker)
+  const pdfTab = canShareFiles ? null : window.open("", "_blank");
 
   try {
     const res = await fetch("/api/pdf", {
@@ -841,24 +848,30 @@ async function openPdf(article, btn) {
     }
 
     const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    const safeName =
+      (article.title || "article").replace(/[^a-zA-Z0-9 _-]/g, "").substring(0, 80) + ".pdf";
     trackEvent("pdf_download", { title: article.title || "Untitled" });
 
-    if (pdfTab && !pdfTab.closed) {
-      // Load PDF into the already-opened tab
-      pdfTab.location.href = blobUrl;
+    if (canShareFiles) {
+      // Mobile: use native share sheet — proper filename, no blob URL
+      const file = new File([blob], safeName, { type: "application/pdf" });
+      await navigator.share({ files: [file] });
+    } else if (pdfTab && !pdfTab.closed) {
+      // Desktop: load PDF into the already-opened tab
+      pdfTab.location.href = URL.createObjectURL(blob);
     } else {
       // Popup was blocked — fall back to download
       const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = (article.title || "article").replace(/[^a-zA-Z0-9 _-]/g, "") + ".pdf";
+      a.href = URL.createObjectURL(blob);
+      a.download = safeName;
       document.body.appendChild(a);
       a.click();
       a.remove();
     }
   } catch (err) {
     if (pdfTab && !pdfTab.closed) pdfTab.close();
-    showError(err.message);
+    // AbortError means user dismissed the share sheet — not a real error
+    if (err.name !== "AbortError") showError(err.message);
   } finally {
     targetBtn.disabled = false;
     if (strong) {
