@@ -104,6 +104,10 @@ accountSigninBtn.addEventListener("click", () => {
   accountDropdown.hidden = true;
   accountBtn.classList.remove("active");
   showAuthPrompt();
+  // Scroll into view so the auth prompt is visible on mobile
+  setTimeout(() => {
+    authPrompt.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, 50);
 });
 
 accountArchiveBtn.addEventListener("click", () => {
@@ -403,7 +407,10 @@ function showAuthPrompt(afterCage) {
   authPrompt.hidden = false;
   authStatusEl.hidden = true;
   authEmail.value = "";
-  setTimeout(() => authEmail.focus(), 100);
+  // Use requestAnimationFrame instead of setTimeout to preserve the
+  // user-gesture chain on iOS Safari (setTimeout breaks it, preventing
+  // the keyboard from opening and the focus from taking effect).
+  requestAnimationFrame(() => authEmail.focus());
 }
 
 // --- Checkout ---
