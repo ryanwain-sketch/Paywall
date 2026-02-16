@@ -1805,18 +1805,29 @@ app.post("/api/pdf", async (req, res) => {
       .stroke();
     doc.moveDown(0.3);
 
-    const dateStr = new Date().toLocaleDateString("en-GB", {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-GB", {
       day: "numeric",
       month: "long",
       year: "numeric",
+    });
+    const timeStr = now.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
     doc
       .font("Helvetica")
       .fontSize(8)
       .fillColor("#aaaaaa")
-      .text(`Caged by Cage that Page — PDF generated ${dateStr}`, {
-        align: "center",
-      });
+      .text("Archived with ", { align: "center", continued: true })
+      .fillColor("#6b7ce0")
+      .text("Cage that Page", {
+        link: "https://cagethatpage.com",
+        underline: true,
+        continued: true,
+      })
+      .fillColor("#aaaaaa")
+      .text(` — ${dateStr} at ${timeStr}`, { link: null, underline: false });
 
     doc.end();
   } catch (err) {
