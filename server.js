@@ -1049,7 +1049,7 @@ app.get("/success", async (req, res) => {
       proCustomers.add(session.customer);
 
       // Link Stripe customer to user account
-      const email = getAuthEmail(req) || session.customer_email;
+      const email = getAuthEmail(req) || session.customer_details?.email || session.customer_email;
       if (email) {
         db.linkStripeCustomer(email, session.customer);
 
