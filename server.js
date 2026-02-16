@@ -981,8 +981,36 @@ app.post("/api/auth/send-link", async (req, res) => {
   res.json({ ok: true });
 });
 
+// GET: Landing page for magic link — validates token without consuming it.
+// This defeats email-client link prefetching (Outlook SafeLinks, etc.) which
+// would otherwise silently consume the one-time token before the user clicks.
 app.get("/api/auth/verify", (req, res) => {
   const { token } = req.query;
+  if (!token) return res.redirect("/?auth=invalid");
+
+  const email = db.checkMagicLink(token);
+  if (!email) return res.redirect("/?auth=expired");
+
+  // Show a minimal confirmation page that auto-submits via POST
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signing in…</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0a0a;color:#e5e5e5}
+.card{text-align:center;padding:2rem}.card h2{margin-bottom:.5rem;font-size:1.25rem}.card p{color:#888;font-size:.9rem;margin-bottom:1.5rem}
+button{background:#FF6B2C;color:#fff;border:none;padding:.75rem 2rem;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}button:hover{background:#e55a1b}
+noscript button{font-size:1.1rem;padding:1rem 2.5rem}</style>
+</head><body>
+<div class="card">
+<h2>Cage that Page</h2>
+<p>Signing you in as ${email.replace(/(.{2})(.*)(@.*)/, (_, a, b, c) => a + "*".repeat(b.length) + c)}</p>
+<form method="POST" action="/api/auth/verify"><input type="hidden" name="token" value="${token}">
+<noscript><button type="submit">Sign in</button></noscript></form>
+<script>document.forms[0].submit();</script>
+</div></body></html>`);
+});
+
+// POST: Actually consume the token and create the session
+app.post("/api/auth/verify", express.urlencoded({ extended: false }), (req, res) => {
+  const { token } = req.body;
   if (!token) return res.redirect("/?auth=invalid");
 
   const email = db.verifyMagicLink(token);

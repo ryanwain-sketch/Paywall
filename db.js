@@ -117,6 +117,11 @@ function createMagicLink(email) {
   return token;
 }
 
+function checkMagicLink(token) {
+  const row = stmt.getMagicLink.get(token, Date.now());
+  return row ? row.email : null;
+}
+
 function verifyMagicLink(token) {
   const row = stmt.getMagicLink.get(token, Date.now());
   if (!row) return null;
@@ -217,6 +222,7 @@ setInterval(cleanup, 60 * 60 * 1000);
 
 module.exports = {
   createMagicLink,
+  checkMagicLink,
   verifyMagicLink,
   createSession,
   getSessionUser,
