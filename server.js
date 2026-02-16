@@ -22,7 +22,7 @@ const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toStri
 
 // --- Email setup (Resend) ---
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM || "Cage that Page <onboarding@resend.dev>";
+const EMAIL_FROM = process.env.EMAIL_FROM || "Cage that Page <support@cagethatpage.com>";
 
 let resend = null;
 if (RESEND_API_KEY) {
