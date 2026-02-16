@@ -937,6 +937,19 @@ function setRateLimitHeaders(res, bucket, isPro) {
   }
 }
 
+// --- Auth logging helper ---
+
+function authLog(event, req, extra = {}) {
+  const entry = {
+    ts: new Date().toISOString(),
+    event,
+    ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+    ua: req.headers["user-agent"] || "unknown",
+    ...extra,
+  };
+  console.log(`[auth] ${JSON.stringify(entry)}`);
+}
+
 // --- Auth endpoints ---
 
 app.post("/api/auth/send-link", async (req, res) => {
@@ -954,6 +967,7 @@ app.post("/api/auth/send-link", async (req, res) => {
     sendLinkLimits.set(lower, bucket);
   }
   if (bucket.count >= SEND_LINK_MAX) {
+    authLog("send-link:rate-limited", req, { email: lower });
     return res.status(429).json({ error: "Too many requests. Please wait a few minutes." });
   }
   bucket.count++;
@@ -970,8 +984,10 @@ app.post("/api/auth/send-link", async (req, res) => {
         text: `Click this link to sign in:\n\n${link}\n\nThis link expires in 15 minutes.\n\nIf you didn't request this, you can ignore this email.`,
         html: `<p>Click the link below to sign in:</p><p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#FF6B2C;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Sign in to Cage that Page</a></p><p style="color:#888;font-size:13px;">This link expires in 15 minutes. If you didn't request this, you can ignore this email.</p>`,
       });
+      authLog("send-link:ok", req, { email: lower });
     } catch (err) {
       console.error("Resend email failed:", err.message);
+      authLog("send-link:email-failed", req, { email: lower, error: err.message });
       return res.status(500).json({ error: "Failed to send email. Please try again." });
     }
   } else {
@@ -990,8 +1006,12 @@ app.get("/api/auth/verify", (req, res) => {
   if (!token) return res.redirect("/?auth=invalid");
 
   const email = db.verifyMagicLink(token);
-  if (!email) return res.redirect("/?auth=expired");
+  if (!email) {
+    authLog("verify:failed", req, { reason: "invalid-or-expired" });
+    return res.redirect("/?auth=expired");
+  }
 
+  authLog("verify:ok", req, { email });
   const sessionToken = db.createSession(email);
   res.setHeader(
     "Set-Cookie",
@@ -1023,6 +1043,8 @@ app.get("/api/auth/me", (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
+  const email = getAuthEmail(req);
+  authLog("logout", req, { email: email || "anonymous" });
   const cookies = parseCookies(req);
   db.deleteSession(cookies.cage_session || null);
   res.setHeader(
