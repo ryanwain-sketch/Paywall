@@ -530,6 +530,143 @@ function findDeepValue(obj, key, depth = 0) {
   return null;
 }
 
+// --- Social media URL pre-resolution ---
+// When users paste a social media link that wraps an article (e.g. a tweet
+// sharing a Times piece), silently extract the real article URL and cage that.
+
+const WRAPPER_PATTERNS = [
+  {
+    name: "Twitter/X",
+    match: /^https?:\/\/(?:www\.)?(?:twitter\.com|x\.com)\/\w+\/status\/\d+/i,
+    resolve: resolveTwitterUrl,
+  },
+  {
+    name: "Reddit",
+    match: /^https?:\/\/(?:www\.)?(?:old\.)?reddit\.com\/r\/\w+\/comments\//i,
+    resolve: resolveRedditUrl,
+  },
+  {
+    name: "Hacker News",
+    match: /^https?:\/\/(?:www\.)?news\.ycombinator\.com\/item\?id=\d+/i,
+    resolve: resolveHackerNewsUrl,
+  },
+];
+
+async function resolveWrapperUrl(inputUrl) {
+  for (const { name, match, resolve } of WRAPPER_PATTERNS) {
+    if (match.test(inputUrl)) {
+      try {
+        console.log(`URL looks like ${name} — extracting article link`);
+        const articleUrl = await resolve(inputUrl);
+        if (articleUrl) {
+          console.log(`Resolved to: ${articleUrl}`);
+          return articleUrl;
+        }
+        console.log(`${name} post had no extractable article link`);
+      } catch (err) {
+        console.error(`${name} URL resolution failed: ${err.message}`);
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+async function resolveTwitterUrl(tweetUrl) {
+  const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}&omit_script=true`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const resp = await fetch(oembedUrl, { signal: controller.signal });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.html) return null;
+
+    // Extract all href URLs from the oEmbed HTML
+    const linkRegex = /href="(https?:\/\/[^"]+)"/g;
+    const hrefs = [];
+    let m;
+    while ((m = linkRegex.exec(data.html)) !== null) {
+      hrefs.push(m[1]);
+    }
+
+    // Separate t.co links from any already-resolved external links
+    const tcoLinks = [];
+    for (const href of hrefs) {
+      try {
+        const host = new URL(href).hostname.toLowerCase();
+        // Skip twitter/x internal links
+        if (host.includes("twitter.com") || host.includes("x.com") || host === "pic.twitter.com") continue;
+        if (host === "t.co") {
+          tcoLinks.push(href);
+        } else {
+          // Already an external URL — use it directly
+          return href;
+        }
+      } catch { /* skip malformed */ }
+    }
+
+    // Follow t.co redirects to find the real article URL
+    for (const tco of tcoLinks) {
+      try {
+        const r = await fetch(tco, { method: "HEAD", redirect: "follow", signal: controller.signal });
+        const resolved = r.url;
+        const host = new URL(resolved).hostname.toLowerCase();
+        if (!host.includes("twitter.com") && !host.includes("x.com") && host !== "t.co") {
+          return resolved;
+        }
+      } catch { /* skip failed redirects */ }
+    }
+
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveRedditUrl(redditUrl) {
+  // Reddit exposes post data as JSON by appending .json
+  const jsonUrl = redditUrl.replace(/\/?(?:\?.*)?$/, ".json");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const resp = await fetch(jsonUrl, {
+      headers: { "User-Agent": "CageThatPage/1.0" },
+      signal: controller.signal,
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const postUrl = data?.[0]?.data?.children?.[0]?.data?.url;
+    if (!postUrl) return null;
+    // Only return external links (not self-posts)
+    const host = new URL(postUrl).hostname.toLowerCase();
+    if (!host.includes("reddit.com") && !host.includes("redd.it")) {
+      return postUrl;
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveHackerNewsUrl(hnUrl) {
+  const idMatch = hnUrl.match(/id=(\d+)/);
+  if (!idMatch) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const resp = await fetch(
+      `https://hacker-news.firebaseio.com/v0/item/${idMatch[1]}.json`,
+      { signal: controller.signal }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.url || null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // --- Archive fallback via plain HTTP (works through proxies) ---
 const ARCHIVE_SOURCES = [
   (url) => `https://archive.ph/newest/${url}`,
@@ -1244,7 +1381,7 @@ app.get("/privacy", (req, res) => {
 
 // Archive: fetch article and extract readable content
 app.post("/api/archive", async (req, res) => {
-  const { url } = req.body;
+  let { url } = req.body;
   if (!url) {
     return res.status(400).json({ error: "URL is required" });
   }
@@ -1290,6 +1427,14 @@ app.post("/api/archive", async (req, res) => {
       res.set("X-RateLimit-Limit", String(UNAUTH_DAILY_LIMIT));
       res.set("X-RateLimit-Remaining", String(Math.max(0, UNAUTH_DAILY_LIMIT - bucket.count)));
     }
+  }
+
+  // Pre-resolve social media wrapper URLs (e.g. X post linking to a Times article)
+  try {
+    const resolved = await resolveWrapperUrl(url);
+    if (resolved) url = resolved;
+  } catch (err) {
+    console.error("URL pre-resolution failed:", err.message);
   }
 
   try {
