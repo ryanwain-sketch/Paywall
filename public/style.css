@@ -1015,7 +1015,14 @@ header h1 {
 }
 
 .paste-actions {
+  display: flex;
+  gap: 10px;
   margin-top: 16px;
+}
+
+.paste-actions .pdf-btn {
+  flex: 1;
+  margin-top: 0;
 }
 
 .paste-actions[hidden] {
@@ -1133,6 +1140,73 @@ header h1 {
   opacity: 0.85;
   font-weight: 400;
 }
+
+/* --- Share Button (alongside PDF) --- */
+.pdf-btn-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.pdf-btn-group .pdf-btn {
+  margin-top: 0;
+  flex: 1;
+}
+
+.share-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 20px;
+  background: var(--dark);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.2s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.share-btn:hover {
+  background: #444;
+}
+
+.share-btn:active {
+  transform: scale(0.98);
+}
+
+.share-btn:disabled {
+  background: #ccc;
+  cursor: wait;
+}
+
+.share-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Inline share button in URL rows */
+.url-row-share-btn {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--dark);
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: background 0.2s;
+}
+
+.url-row-share-btn:hover { background: #444; }
+.url-row-share-btn:disabled { background: #ccc; cursor: wait; }
 
 /* --- History --- */
 .history {
@@ -1278,6 +1352,20 @@ header h1 {
 }
 
 .history-download-btn:disabled {
+  background: #ccc;
+  cursor: wait;
+}
+
+.history-share-btn {
+  background: var(--dark);
+  color: #fff;
+}
+
+.history-share-btn:hover {
+  background: #444;
+}
+
+.history-share-btn:disabled {
   background: #ccc;
   cursor: wait;
 }

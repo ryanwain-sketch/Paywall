@@ -28,6 +28,8 @@ const pasteArchiveLink = document.getElementById("paste-archive-link");
 const pasteTextarea = document.getElementById("paste-textarea");
 const pasteActions = document.getElementById("paste-actions");
 const pastePdfBtn = document.getElementById("paste-pdf-btn");
+const shareBtn = document.getElementById("share-btn");
+const pasteShareBtn = document.getElementById("paste-share-btn");
 
 const authPrompt = document.getElementById("auth-prompt");
 const authPromptTitle = document.getElementById("auth-prompt-title");
@@ -67,6 +69,7 @@ const FREE_LIMIT = 3;
 const MAX_PARALLEL_ROWS = 4;
 
 let currentArticle = null;
+let currentPasteArticle = null;
 let isPro = false;
 let isAuthenticated = false;
 let userEmail = null;
@@ -79,6 +82,19 @@ urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") archive();
 });
 pdfBtn.addEventListener("click", () => openPdf(currentArticle));
+
+// Show share buttons only on devices that support native file sharing
+const canShareFiles =
+  navigator.canShare &&
+  navigator.canShare({
+    files: [new File([""], "t.pdf", { type: "application/pdf" })],
+  });
+if (canShareFiles) {
+  shareBtn.hidden = false;
+  pasteShareBtn.hidden = false;
+  shareBtn.addEventListener("click", () => sharePdf(currentArticle, shareBtn));
+}
+
 clearHistoryBtn.addEventListener("click", clearHistory);
 
 pasteTextarea.addEventListener("input", () => {
@@ -198,6 +214,7 @@ pastePdfBtn.addEventListener("click", async () => {
     }
 
     saveToHistory(article);
+    currentPasteArticle = article;
     pastePdfBtn.disabled = false;
     if (strong) strong.textContent = "Open PDF";
     openPdf(article, pastePdfBtn);
@@ -207,6 +224,12 @@ pastePdfBtn.addEventListener("click", async () => {
     if (strong) strong.textContent = "Open PDF";
   }
 });
+
+if (canShareFiles) {
+  pasteShareBtn.addEventListener("click", () => {
+    if (currentPasteArticle) sharePdf(currentPasteArticle, pasteShareBtn);
+  });
+}
 
 upgradeBtn.addEventListener("click", startCheckout);
 
@@ -619,10 +642,14 @@ async function archive() {
     articleExcerpt.textContent = data.excerpt || "";
 
     primaryRow.className = "url-row primary-row caged";
-    primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
+    primaryStatus.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>' + (canShareFiles ? '<button class="url-row-share-btn" type="button">Share</button>' : '');
     primaryStatus.querySelector(".url-row-pdf-btn").addEventListener("click", () => {
       openPdf(currentArticle);
     });
+    const primaryShareBtn = primaryStatus.querySelector(".url-row-share-btn");
+    if (primaryShareBtn) {
+      primaryShareBtn.addEventListener("click", () => sharePdf(currentArticle, primaryShareBtn));
+    }
 
     // Show article metadata in the input (greyed, overwritable)
     const label = data.title || "Untitled";
@@ -779,10 +806,14 @@ async function archiveRow(id) {
     trackEvent("cage_article", { site: new URL(url).hostname, method: "auto" });
     saveToHistory(article);
 
-    statusEl.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>';
+    statusEl.innerHTML = '<svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><button class="url-row-pdf-btn" type="button">PDF</button>' + (canShareFiles ? '<button class="url-row-share-btn" type="button">Share</button>' : '');
     statusEl.querySelector(".url-row-pdf-btn").addEventListener("click", (e) => {
       openPdf(article, e.target);
     });
+    const rowShareBtn = statusEl.querySelector(".url-row-share-btn");
+    if (rowShareBtn) {
+      rowShareBtn.addEventListener("click", () => sharePdf(article, rowShareBtn));
+    }
 
     // Show article title in input (greyed, overwritable)
     const label = data.title || "Untitled";
@@ -825,15 +856,8 @@ async function openPdf(article, btn) {
     targetBtn.textContent = "\u2026";
   }
 
-  // Detect native file sharing support (iOS Safari, Android Chrome, etc.)
-  const canShareFiles =
-    navigator.canShare &&
-    navigator.canShare({
-      files: [new File([""], "test.pdf", { type: "application/pdf" })],
-    });
-
-  // Only open a blank tab on desktop (within user gesture to avoid popup blocker)
-  const pdfTab = canShareFiles ? null : window.open("", "_blank");
+  // Open blank tab immediately (within user gesture) so popup blocker allows it
+  const pdfTab = window.open("", "_blank");
 
   try {
     const res = await fetch("/api/pdf", {
@@ -852,12 +876,7 @@ async function openPdf(article, btn) {
       (article.title || "article").replace(/[^a-zA-Z0-9 _-]/g, "").substring(0, 80) + ".pdf";
     trackEvent("pdf_download", { title: article.title || "Untitled" });
 
-    if (canShareFiles) {
-      // Mobile: use native share sheet — proper filename, no blob URL
-      const file = new File([blob], safeName, { type: "application/pdf" });
-      await navigator.share({ files: [file] });
-    } else if (pdfTab && !pdfTab.closed) {
-      // Desktop: load PDF into the already-opened tab
+    if (pdfTab && !pdfTab.closed) {
       pdfTab.location.href = URL.createObjectURL(blob);
     } else {
       // Popup was blocked — fall back to download
@@ -870,8 +889,7 @@ async function openPdf(article, btn) {
     }
   } catch (err) {
     if (pdfTab && !pdfTab.closed) pdfTab.close();
-    // AbortError means user dismissed the share sheet — not a real error
-    if (err.name !== "AbortError") showError(err.message);
+    showError(err.message);
   } finally {
     targetBtn.disabled = false;
     if (strong) {
@@ -879,6 +897,40 @@ async function openPdf(article, btn) {
     } else {
       targetBtn.textContent = origText;
     }
+  }
+}
+
+async function sharePdf(article, btn) {
+  if (!article) return;
+
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing\u2026";
+
+  try {
+    const res = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(article),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to generate PDF.");
+    }
+
+    const blob = await res.blob();
+    const safeName =
+      (article.title || "article").replace(/[^a-zA-Z0-9 _-]/g, "").substring(0, 80) + ".pdf";
+    const file = new File([blob], safeName, { type: "application/pdf" });
+
+    trackEvent("pdf_share", { title: article.title || "Untitled" });
+    await navigator.share({ files: [file] });
+  } catch (err) {
+    if (err.name !== "AbortError") showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
@@ -1042,12 +1094,18 @@ function renderHistory() {
       ${item.excerpt ? `<div class="history-card-excerpt">${escapeHtml(item.excerpt)}</div>` : ""}
       <div class="history-card-actions">
         <button class="history-download-btn" type="button"><strong>PDF</strong></button>
+        ${canShareFiles ? '<button class="history-share-btn" type="button">Share</button>' : ""}
         <button class="history-delete-btn" type="button">Remove</button>
       </div>
     `;
 
     const dlBtn = card.querySelector(".history-download-btn");
     dlBtn.addEventListener("click", () => openPdf(item, dlBtn));
+
+    const histShareBtn = card.querySelector(".history-share-btn");
+    if (histShareBtn) {
+      histShareBtn.addEventListener("click", () => sharePdf(item, histShareBtn));
+    }
 
     card.querySelector(".history-delete-btn").addEventListener("click", () => {
       deleteFromHistory(item.sourceUrl);
