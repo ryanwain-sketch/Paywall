@@ -926,6 +926,79 @@ app.get("/api/usage", (req, res) => {
   });
 });
 
+// --- Cloud article history (Pro) ---
+
+app.get("/api/articles", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+  if (!isProUser(req)) return res.status(403).json({ error: "Pro subscription required" });
+
+  const rows = db.getArticles(email);
+  const articles = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    byline: r.byline,
+    siteName: r.site_name,
+    excerpt: r.excerpt,
+    textContent: r.text_content,
+    articleDate: r.article_date,
+    sourceUrl: r.source_url,
+    cagedAt: r.caged_at,
+  }));
+  res.json({ articles });
+});
+
+app.post("/api/articles", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+  if (!isProUser(req)) return res.status(403).json({ error: "Pro subscription required" });
+
+  const { title, byline, siteName, excerpt, textContent, articleDate, sourceUrl, cagedAt } = req.body;
+  if (!sourceUrl && !textContent) {
+    return res.status(400).json({ error: "Article content required" });
+  }
+
+  db.saveArticle(email, { title, byline, siteName, excerpt, textContent, articleDate, sourceUrl, cagedAt });
+  res.json({ ok: true });
+});
+
+app.post("/api/articles/batch", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+  if (!isProUser(req)) return res.status(403).json({ error: "Pro subscription required" });
+
+  const { articles } = req.body;
+  if (!Array.isArray(articles)) return res.status(400).json({ error: "articles array required" });
+
+  for (const a of articles) {
+    if (a.sourceUrl || a.textContent) {
+      db.saveArticle(email, a);
+    }
+  }
+  res.json({ ok: true, saved: articles.length });
+});
+
+app.delete("/api/articles/:id", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+  if (!isProUser(req)) return res.status(403).json({ error: "Pro subscription required" });
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid article ID" });
+
+  db.deleteArticle(id, email);
+  res.json({ ok: true });
+});
+
+app.delete("/api/articles", (req, res) => {
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+  if (!isProUser(req)) return res.status(403).json({ error: "Pro subscription required" });
+
+  db.deleteAllArticles(email);
+  res.json({ ok: true });
+});
+
 // --- Stripe Checkout ---
 app.post("/api/checkout", async (req, res) => {
   if (!stripe) {
@@ -942,7 +1015,7 @@ app.post("/api/checkout", async (req, res) => {
           currency: "usd",
           product_data: {
             name: "Cage that Page Pro",
-            description: "Unlimited cages, cloud history, and batch export",
+            description: "Unlimited cages, cloud history sync, and parallel mode",
           },
           unit_amount: 500,
           recurring: { interval: "month" },
@@ -1362,6 +1435,24 @@ app.post("/api/archive", async (req, res) => {
         fallbackUrl: `https://archive.ph/newest/${url}`,
         fallbackLabel: "backup",
       });
+    }
+
+    // Auto-save to cloud history for Pro users
+    if (pro && email) {
+      try {
+        db.saveArticle(email, {
+          sourceUrl: url,
+          title: article.title,
+          byline: article.byline,
+          siteName: article.siteName,
+          excerpt: article.excerpt,
+          textContent: cleanedText,
+          articleDate: null,
+          cagedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("Cloud history save failed:", err.message);
+      }
     }
 
     res.json({

@@ -33,6 +33,20 @@ db.exec(`
     count INTEGER DEFAULT 0,
     PRIMARY KEY (email, date)
   );
+
+  CREATE TABLE IF NOT EXISTS articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL COLLATE NOCASE,
+    source_url TEXT NOT NULL,
+    title TEXT,
+    byline TEXT,
+    site_name TEXT,
+    excerpt TEXT,
+    text_content TEXT,
+    article_date TEXT,
+    caged_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(email, source_url)
+  );
 `);
 
 const stmt = {
@@ -66,6 +80,22 @@ const stmt = {
     INSERT INTO usage (email, date, count) VALUES (?, ?, 1)
     ON CONFLICT(email, date) DO UPDATE SET count = count + 1
   `),
+
+  saveArticle: db.prepare(`
+    INSERT INTO articles (email, source_url, title, byline, site_name, excerpt, text_content, article_date, caged_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(email, source_url) DO UPDATE SET
+      title = excluded.title,
+      byline = excluded.byline,
+      site_name = excluded.site_name,
+      excerpt = excluded.excerpt,
+      text_content = excluded.text_content,
+      article_date = excluded.article_date,
+      caged_at = excluded.caged_at
+  `),
+  getArticles: db.prepare("SELECT * FROM articles WHERE email = ? ORDER BY caged_at DESC LIMIT 200"),
+  deleteArticle: db.prepare("DELETE FROM articles WHERE id = ? AND email = ?"),
+  deleteAllArticles: db.prepare("DELETE FROM articles WHERE email = ?"),
 };
 
 function genToken() {
@@ -144,6 +174,35 @@ function incrementUsage(email) {
   stmt.incUsage.run(email.toLowerCase().trim(), today());
 }
 
+// --- Articles (cloud history for Pro) ---
+
+function saveArticle(email, article) {
+  const lower = email.toLowerCase().trim();
+  stmt.saveArticle.run(
+    lower,
+    article.sourceUrl || "",
+    article.title || null,
+    article.byline || null,
+    article.siteName || null,
+    article.excerpt || null,
+    article.textContent || null,
+    article.articleDate || null,
+    article.cagedAt || new Date().toISOString()
+  );
+}
+
+function getArticles(email) {
+  return stmt.getArticles.all(email.toLowerCase().trim());
+}
+
+function deleteArticle(id, email) {
+  return stmt.deleteArticle.run(id, email.toLowerCase().trim());
+}
+
+function deleteAllArticles(email) {
+  return stmt.deleteAllArticles.run(email.toLowerCase().trim());
+}
+
 // --- Cleanup ---
 
 function cleanup() {
@@ -168,4 +227,8 @@ module.exports = {
   getStripeCustomerIds,
   getUsageCount,
   incrementUsage,
+  saveArticle,
+  getArticles,
+  deleteArticle,
+  deleteAllArticles,
 };

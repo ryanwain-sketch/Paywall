@@ -237,6 +237,7 @@ async function fetchAuthState() {
 
     if (isPro) {
       renderProStatus();
+      syncCloudHistory();
     } else if (isAuthenticated) {
       renderUsage(data.remaining, FREE_LIMIT);
     } else {
@@ -392,6 +393,10 @@ async function logout() {
   isAuthenticated = false;
   userEmail = null;
   isPro = false;
+  // Clear local history on sign-out to prevent leaking between accounts
+  localStorage.removeItem(STORAGE_KEY);
+  cloudArticleIds = {};
+  renderHistory();
   renderAuthState();
   await fetchAuthState();
 }
@@ -845,7 +850,58 @@ async function openPdf(article, btn) {
   }
 }
 
-// --- History: localStorage ---
+// --- History: localStorage + cloud sync (Pro) ---
+
+async function syncCloudHistory() {
+  if (!isPro) return;
+  try {
+    const res = await fetch("/api/articles");
+    if (!res.ok) return;
+    const data = await res.json();
+    const cloud = data.articles || [];
+
+    // Merge: local items not in cloud get uploaded; cloud items not in local get added
+    const local = getHistory();
+    const cloudUrls = new Set(cloud.map((a) => a.sourceUrl));
+    const localUrls = new Set(local.map((a) => a.sourceUrl));
+
+    // Upload local-only items to cloud
+    const localOnly = local.filter((a) => a.sourceUrl && !cloudUrls.has(a.sourceUrl));
+    if (localOnly.length > 0) {
+      fetch("/api/articles/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ articles: localOnly }),
+      }).catch(() => {});
+    }
+
+    // Merge cloud items into local (cloud is the source of truth for items not in local)
+    const merged = [...local];
+    for (const item of cloud) {
+      if (!localUrls.has(item.sourceUrl)) {
+        merged.push(item);
+      }
+    }
+
+    // Sort by cagedAt descending
+    merged.sort((a, b) => (b.cagedAt || "").localeCompare(a.cagedAt || ""));
+
+    // Store merged cloud article IDs for delete sync
+    cloudArticleIds = {};
+    for (const item of cloud) {
+      if (item.id && item.sourceUrl) cloudArticleIds[item.sourceUrl] = item.id;
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    renderHistory();
+  } catch {
+    // Silently fail — local history still works
+  }
+}
+
+// Map of sourceUrl -> cloud article ID (populated by sync)
+let cloudArticleIds = {};
+
 function getHistory() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
@@ -858,7 +914,7 @@ function saveToHistory(article) {
   const history = getHistory();
   const filtered = history.filter((h) => h.sourceUrl !== article.sourceUrl);
 
-  filtered.unshift({
+  const entry = {
     title: article.title,
     byline: article.byline,
     siteName: article.siteName,
@@ -867,23 +923,45 @@ function saveToHistory(article) {
     excerpt: article.excerpt,
     sourceUrl: article.sourceUrl,
     cagedAt: new Date().toISOString(),
-  });
+  };
 
+  filtered.unshift(entry);
   if (filtered.length > 50) filtered.length = 50;
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
   renderHistory();
+
+  // Save to cloud for Pro users (fire-and-forget)
+  if (isPro) {
+    fetch("/api/articles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    }).catch(() => {});
+  }
 }
 
 function deleteFromHistory(sourceUrl) {
   const history = getHistory().filter((h) => h.sourceUrl !== sourceUrl);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
   renderHistory();
+
+  // Delete from cloud for Pro users
+  if (isPro && cloudArticleIds[sourceUrl]) {
+    fetch(`/api/articles/${cloudArticleIds[sourceUrl]}`, { method: "DELETE" }).catch(() => {});
+    delete cloudArticleIds[sourceUrl];
+  }
 }
 
 function clearHistory() {
   localStorage.removeItem(STORAGE_KEY);
+  cloudArticleIds = {};
   renderHistory();
+
+  // Clear cloud history for Pro users
+  if (isPro) {
+    fetch("/api/articles", { method: "DELETE" }).catch(() => {});
+  }
 }
 
 function renderHistory() {
@@ -896,6 +974,22 @@ function renderHistory() {
 
   historySection.hidden = false;
   historyList.innerHTML = "";
+
+  // Cloud sync upsell for non-Pro users
+  const existingUpsell = document.getElementById("cloud-upsell");
+  if (existingUpsell) existingUpsell.remove();
+
+  if (!isPro && history.length > 0) {
+    const upsell = document.createElement("div");
+    upsell.id = "cloud-upsell";
+    upsell.className = "cloud-upsell";
+    upsell.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg> <span>Your history lives on this device only. <a href="#" id="cloud-upsell-link">Upgrade to Pro</a> to sync across all your devices.</span>`;
+    historySection.insertBefore(upsell, historyList);
+    document.getElementById("cloud-upsell-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      startCheckout();
+    });
+  }
 
   for (const item of history) {
     const card = document.createElement("div");

@@ -1172,6 +1172,35 @@ header h1 {
   background: var(--error-bg);
 }
 
+.cloud-upsell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.cloud-upsell svg {
+  flex-shrink: 0;
+  color: var(--brand);
+}
+
+.cloud-upsell a {
+  color: var(--brand);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cloud-upsell a:hover {
+  text-decoration: underline;
+}
+
 .history-list {
   display: flex;
   flex-direction: column;
