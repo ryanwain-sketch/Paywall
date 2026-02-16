@@ -1048,18 +1048,36 @@ app.get("/success", async (req, res) => {
     if (session.payment_status === "paid" && session.customer) {
       proCustomers.add(session.customer);
 
-      // Link Stripe customer to user account if authenticated
+      // Link Stripe customer to user account
       const email = getAuthEmail(req) || session.customer_email;
       if (email) {
         db.linkStripeCustomer(email, session.customer);
-      }
 
-      // Legacy pro cookie (for backwards compatibility)
-      const signed = signCookie(session.customer);
-      res.setHeader(
-        "Set-Cookie",
-        `cage_pro=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
-      );
+        // Auto-sign in if not already authenticated
+        if (!getAuthEmail(req)) {
+          const sessionToken = db.createSession(email);
+          res.setHeader(
+            "Set-Cookie",
+            [
+              `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+              `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`,
+            ]
+          );
+        } else {
+          // Already signed in — just set Pro cookie
+          res.setHeader(
+            "Set-Cookie",
+            `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+          );
+        }
+      } else {
+        // No email available — just set Pro cookie
+        const signed = signCookie(session.customer);
+        res.setHeader(
+          "Set-Cookie",
+          `cage_pro=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+        );
+      }
     }
   } catch (err) {
     console.error("Session verify error:", err.message);
