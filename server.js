@@ -1815,19 +1815,24 @@ app.post("/api/pdf", async (req, res) => {
       hour: "2-digit",
       minute: "2-digit",
     });
+    const part1 = "Archived with ";
+    const part2 = "Cage that Page";
+    const part3 = ` — ${dateStr} at ${timeStr}`;
+
+    doc.font("Helvetica").fontSize(8);
+    const totalWidth =
+      doc.widthOfString(part1) +
+      doc.widthOfString(part2) +
+      doc.widthOfString(part3);
+    const startX = (doc.page.width - totalWidth) / 2;
+
     doc
-      .font("Helvetica")
-      .fontSize(8)
       .fillColor("#aaaaaa")
-      .text("Archived with ", { align: "center", continued: true })
+      .text(part1, startX, doc.y, { continued: true })
       .fillColor("#6b7ce0")
-      .text("Cage that Page", {
-        link: "https://cagethatpage.com",
-        underline: true,
-        continued: true,
-      })
+      .text(part2, { continued: true, link: "https://cagethatpage.com", underline: true })
       .fillColor("#aaaaaa")
-      .text(` — ${dateStr} at ${timeStr}`, { link: null, underline: false });
+      .text(part3, { link: null, underline: false });
 
     doc.end();
   } catch (err) {
