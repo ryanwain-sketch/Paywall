@@ -122,7 +122,11 @@ accountArchiveBtn.addEventListener("click", () => {
 accountProBtn.addEventListener("click", () => {
   accountDropdown.hidden = true;
   accountBtn.classList.remove("active");
-  if (!isPro) startCheckout();
+  if (isPro) {
+    openBillingPortal();
+  } else {
+    startCheckout();
+  }
 });
 
 accountLogoutBtn.addEventListener("click", () => {
@@ -268,7 +272,7 @@ function renderAuthState() {
     if (isPro) {
       accountTierBadge.textContent = "Pro";
       accountTierBadge.className = "tier-badge badge-pro";
-      accountProLabel.textContent = "Pro member";
+      accountProLabel.textContent = "Manage subscription";
       accountProBtn.classList.remove("pro-item");
     } else {
       accountTierBadge.textContent = "Member";
@@ -416,6 +420,21 @@ function showAuthPrompt(afterCage) {
   // user-gesture chain on iOS Safari (setTimeout breaks it, preventing
   // the keyboard from opening and the focus from taking effect).
   requestAnimationFrame(() => authEmail.focus());
+}
+
+// --- Billing portal (manage / cancel subscription) ---
+async function openBillingPortal() {
+  try {
+    const res = await fetch("/api/billing-portal", { method: "POST" });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error(data.error || "Could not open billing portal.");
+    }
+  } catch (err) {
+    showError(err.message);
+  }
 }
 
 // --- Checkout ---

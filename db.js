@@ -208,10 +208,8 @@ function deleteAllArticles(email) {
 
 function cleanup() {
   const now = Date.now();
-  db.exec(
-    `DELETE FROM sessions WHERE expires_at <= ${now};
-     DELETE FROM magic_links WHERE expires_at <= ${now};`
-  );
+  stmt.deleteExpiredSessions.run(now);
+  stmt.deleteExpiredLinks.run(now);
 }
 
 setInterval(cleanup, 60 * 60 * 1000);

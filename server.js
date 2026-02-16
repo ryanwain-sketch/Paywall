@@ -1015,7 +1015,7 @@ app.get("/api/auth/verify", (req, res) => {
   const sessionToken = db.createSession(email);
   res.setHeader(
     "Set-Cookie",
-    `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`
+    `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`
   );
   res.redirect("/?auth=ok");
 });
@@ -1049,7 +1049,7 @@ app.post("/api/auth/logout", (req, res) => {
   db.deleteSession(cookies.cage_session || null);
   res.setHeader(
     "Set-Cookie",
-    "cage_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    "cage_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
   );
   res.json({ ok: true });
 });
@@ -1222,15 +1222,15 @@ app.get("/success", async (req, res) => {
           res.setHeader(
             "Set-Cookie",
             [
-              `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
-              `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`,
+              `cage_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+              `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`,
             ]
           );
         } else {
           // Already signed in — just set Pro cookie
           res.setHeader(
             "Set-Cookie",
-            `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+            `cage_pro=${encodeURIComponent(signCookie(session.customer))}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
           );
         }
       } else {
@@ -1238,7 +1238,7 @@ app.get("/success", async (req, res) => {
         const signed = signCookie(session.customer);
         res.setHeader(
           "Set-Cookie",
-          `cage_pro=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+          `cage_pro=${encodeURIComponent(signed)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
         );
       }
     }
@@ -1247,6 +1247,30 @@ app.get("/success", async (req, res) => {
   }
 
   res.redirect("/?pro=1");
+});
+
+// Stripe Billing Portal — lets Pro users manage/cancel subscription
+app.post("/api/billing-portal", async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Payments not configured" });
+
+  const email = getAuthEmail(req);
+  if (!email) return res.status(401).json({ error: "Not authenticated" });
+
+  const user = db.getUser(email);
+  if (!user || !user.stripe_customer_id) {
+    return res.status(400).json({ error: "No subscription found" });
+  }
+
+  try {
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: SITE_URL,
+    });
+    res.json({ url: portalSession.url });
+  } catch (err) {
+    console.error("Billing portal error:", err.message);
+    res.status(500).json({ error: "Failed to open billing portal." });
+  }
 });
 
 // --- Legal pages ---
@@ -1854,6 +1878,14 @@ async function syncProCustomers() {
   }
   console.log(`Pro sync complete: ${proCustomers.size} active Pro user(s)`);
 }
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+  process.exit(1);
+});
 
 app.listen(PORT, async () => {
   console.log(`Cage that Page running at http://localhost:${PORT}`);
