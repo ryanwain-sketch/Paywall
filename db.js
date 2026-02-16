@@ -60,9 +60,8 @@ const stmt = {
     "INSERT INTO magic_links (token, email, expires_at) VALUES (?, ?, ?)"
   ),
   getMagicLink: db.prepare(
-    "SELECT * FROM magic_links WHERE token = ? AND used = 0 AND expires_at > ?"
+    "SELECT * FROM magic_links WHERE token = ? AND expires_at > ?"
   ),
-  useMagicLink: db.prepare("UPDATE magic_links SET used = 1 WHERE token = ?"),
 
   createSession: db.prepare(
     "INSERT INTO sessions (token, email, expires_at) VALUES (?, ?, ?)"
@@ -117,15 +116,12 @@ function createMagicLink(email) {
   return token;
 }
 
-function checkMagicLink(token) {
-  const row = stmt.getMagicLink.get(token, Date.now());
-  return row ? row.email : null;
-}
-
 function verifyMagicLink(token) {
   const row = stmt.getMagicLink.get(token, Date.now());
   if (!row) return null;
-  stmt.useMagicLink.run(token);
+  // Token stays valid until it expires (15 min) — not single-use.
+  // Single-use tokens break with Outlook SafeLinks / Microsoft ATP which
+  // prefetch AND execute JS on link pages, consuming tokens before the user.
   return row.email;
 }
 
@@ -222,7 +218,6 @@ setInterval(cleanup, 60 * 60 * 1000);
 
 module.exports = {
   createMagicLink,
-  checkMagicLink,
   verifyMagicLink,
   createSession,
   getSessionUser,
